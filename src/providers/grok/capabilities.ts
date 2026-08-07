@@ -6,6 +6,7 @@ export const GROK_PROVIDER_CAPABILITIES: Readonly<ProviderCapabilities> = Object
   supportsFork: true,
   supportsImageAttachments: true,
   supportsInstructionMode: true,
+  supportsHostTools: false,
   supportsMcpTools: false,
   supportsNativeHistory: true,
   supportsPlanMode: true,

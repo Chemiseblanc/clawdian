@@ -9,6 +9,7 @@ import {
   TOOL_WEB_SEARCH,
   TOOL_WRITE,
 } from '../../../core/tools/toolNames';
+import { canonicalizeOmpHostToolName } from '../runtime/OmpHostToolAdapter';
 
 const OMP_BUILT_IN_TOOL_NAMES: Record<string, string> = {
   bash: TOOL_BASH,
@@ -81,7 +82,9 @@ export function getOmpToolName(value: Record<string, unknown>): string {
 }
 
 export function normalizeOmpToolName(name: string): string {
-  return OMP_BUILT_IN_TOOL_NAMES[name.trim().toLowerCase()] ?? name;
+  const normalized = name.trim();
+  return OMP_BUILT_IN_TOOL_NAMES[normalized.toLowerCase()]
+    ?? canonicalizeOmpHostToolName(normalized);
 }
 
 function firstString(...values: unknown[]): string | undefined {

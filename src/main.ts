@@ -12,6 +12,7 @@ import type { Editor, TAbstractFile, WorkspaceLeaf } from 'obsidian';
 import { MarkdownView, Notice, Plugin, TFolder } from 'obsidian';
 
 import { ConversationRepository } from './app/conversations/ConversationRepository';
+import { PeriodicJobHostToolCatalog } from './app/jobs/PeriodicJobHostToolCatalog';
 import { PeriodicJobsService } from './app/jobs/PeriodicJobsService';
 import { ClaudianProviderHost } from './app/providers/ClaudianProviderHost';
 import { ChatModelSelectionCoordinator } from './app/settings/ChatModelSelectionCoordinator';
@@ -49,6 +50,7 @@ import type {
   ProviderId,
 } from './core/providers/types';
 import { DEFAULT_CHAT_PROVIDER_ID } from './core/providers/types';
+import type { HostToolCatalog } from './core/tools/HostToolCatalog';
 import type {
   ClaudianSettings,
   Conversation,
@@ -134,6 +136,7 @@ export default class ClaudianPlugin extends Plugin {
     () => this.settings?.maxWarmAgentProcesses ?? DEFAULT_MAX_WARM_AGENT_PROCESSES,
   );
   private periodicJobsService: PeriodicJobsService | null = null;
+  private hostToolCatalogValue: HostToolCatalog | null = null;
   private settingsCoordinator!: SettingsCoordinator<ClaudianSettings>;
   private chatModelSelectionCoordinator!: ChatModelSelectionCoordinator;
   private pinnedLinkedNotePaths!: PinnedLinkedNotePathCoordinator;
@@ -163,6 +166,13 @@ export default class ClaudianPlugin extends Plugin {
       throw new Error('Periodic jobs are unavailable before settings load.');
     }
     return this.periodicJobsService;
+  }
+
+  get hostTools(): HostToolCatalog {
+    if (!this.hostToolCatalogValue) {
+      throw new Error('Host tools are unavailable before settings load.');
+    }
+    return this.hostToolCatalogValue;
   }
 
   async onload() {
@@ -471,6 +481,7 @@ export default class ClaudianPlugin extends Plugin {
         ),
       },
     );
+    this.hostToolCatalogValue = new PeriodicJobHostToolCatalog(this.periodicJobsService);
     this.chatModelSelectionCoordinator = new ChatModelSelectionCoordinator(
       this.settingsCoordinator,
     );

@@ -7,6 +7,7 @@ function createPlugin(overrides: Record<string, unknown> = {}): ClaudianPlugin {
     app: {},
     executionLifecycleRegistry: {},
     settings: {},
+    hostTools: {},
     storage: {},
     manifest: { version: '1.2.3' },
     saveSettings: jest.fn(async () => undefined),
@@ -47,6 +48,7 @@ describe('ClaudianProviderHost', () => {
     await expect(host.getResolvedProviderCliPath('codex')).resolves.toBe('/usr/bin/codex');
 
     expect(trace).toEqual(['save', 'environment', 'cli']);
+    expect(host.hostTools).toBe(plugin.hostTools);
     expect('registerView' in host).toBe(false);
     expect('addCommand' in host).toBe(false);
   });

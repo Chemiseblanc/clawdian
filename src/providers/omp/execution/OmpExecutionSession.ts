@@ -68,6 +68,10 @@ import {
 import { buildOmpUsageInfo } from '../runtime/buildOmpUsageInfo';
 import type { OmpExtensionUiRenderer } from '../runtime/OmpExtensionUiBridge';
 import {
+  buildOmpHostToolRegistration,
+  toOmpHostToolName,
+} from '../runtime/OmpHostToolAdapter';
+import {
   buildOmpLaunchSpec,
   type OmpLaunchSpec,
 } from '../runtime/OmpLaunchSpec';
@@ -148,6 +152,8 @@ implements ProviderExecutionSession, SteerableExecutionSession {
   readonly providerId = 'omp' as const;
   readonly sessionInstanceId = randomUUID();
 
+  private activeHostToolModel: string | null = null;
+  private activeHostToolNames: Readonly<Record<string, string>> = {};
   private activeRun: ActiveRun | null = null;
   private disposalPromise: Promise<void> | null = null;
   private disposed = false;
@@ -384,6 +390,11 @@ implements ProviderExecutionSession, SteerableExecutionSession {
       if (!this.isActive(active) || !this.kernel) return;
 
       await this.applyModelConfiguration(encoded, active.abortController.signal);
+      await this.applyHostToolConfiguration(
+        request,
+        encoded.model,
+        active.abortController.signal,
+      );
       if (!this.isActive(active)) return;
       const previousLeafId = getOmpState(this.providerState).leafEntryId ?? null;
       const compactInstructions = getCompactInstructions(encoded.prompt);
@@ -670,6 +681,94 @@ implements ProviderExecutionSession, SteerableExecutionSession {
     }
   }
 
+  private async applyHostToolConfiguration(
+    request: ProviderExecutionRequest,
+    model: string,
+    signal: AbortSignal,
+  ): Promise<void> {
+    if (this.config.hostToolAccess !== 'enabled') {
+      this.activeHostToolNames = {};
+      this.activeHostToolModel = null;
+      return;
+    }
+    if (!this.kernel) {
+      throw new Error('Omp execution kernel is unavailable.');
+    }
+    this.activeHostToolNames = {};
+    this.activeHostToolModel = null;
+    const registration = buildOmpHostToolRegistration(
+      this.host.hostTools,
+      request.toolPolicy,
+      this.config.hostToolAccess,
+    );
+    await this.kernel.request(
+      'set_host_tools',
+      { tools: registration.definitions },
+      undefined,
+      signal,
+    );
+    this.activeHostToolNames = registration.canonicalNameByNativeName;
+    this.activeHostToolModel = model;
+  }
+
+  private async handleHostToolCall(
+    kernel: OmpExecutionKernel,
+    generation: number,
+    event: OmpRpcRecord,
+  ): Promise<void> {
+    const id = getString(event.id);
+    const nativeName = getString(event.toolName);
+    const canonicalName = nativeName
+      ? this.activeHostToolNames[nativeName]
+      : undefined;
+    if (!id) return;
+    if (!canonicalName || !this.activeHostToolModel) {
+      kernel.send({
+        type: 'host_tool_result',
+        id,
+        isError: true,
+        result: {
+          content: [{ type: 'text', text: 'Host tool invocation is not authorized.' }],
+          details: { code: 'permission_denied' },
+        },
+      });
+      return;
+    }
+
+    const result = await this.host.hostTools.invoke(
+      canonicalName,
+      event.arguments,
+      { providerId: 'omp', model: this.activeHostToolModel },
+    ).catch(() => ({
+      ok: false as const,
+      error: {
+        code: 'internal_error' as const,
+        message: 'Host tool operation failed.',
+      },
+    }));
+    if (!this.isCurrentKernel(kernel, generation)) return;
+    if (result.ok) {
+      kernel.send({
+        type: 'host_tool_result',
+        id,
+        result: {
+          content: [{ type: 'text', text: JSON.stringify(result.value, null, 2) }],
+          details: result.value,
+        },
+      });
+      return;
+    }
+    kernel.send({
+      type: 'host_tool_result',
+      id,
+      isError: true,
+      result: {
+        content: [{ type: 'text', text: result.error.message }],
+        details: { error: result.error },
+      },
+    });
+  }
+
   private handleRpcEvent(
     kernel: OmpExecutionKernel,
     generation: number,
@@ -678,6 +777,12 @@ implements ProviderExecutionSession, SteerableExecutionSession {
     if (!this.isCurrentKernel(kernel, generation)) return;
     const active = this.activeRun;
     if (!active || active.terminal) return;
+    if (event.type === 'host_tool_call') {
+      this.ensureAccepted(active);
+      void this.handleHostToolCall(kernel, generation, event);
+      return;
+    }
+    if (event.type === 'host_tool_cancel') return;
     if (event.type === 'extension_ui_request') {
       const id = getString(event.id);
       if (id) {
@@ -1429,7 +1534,7 @@ function resolveToolProfile(
     return {
       noTools: policy.names.length === 0,
       toolMode: settings.toolMode,
-      tools: policy.names,
+      tools: policy.names.map(toOmpHostToolName),
     };
   }
   return {

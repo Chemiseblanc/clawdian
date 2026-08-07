@@ -6,6 +6,7 @@ import { ProviderSettingsCoordinator } from '../../core/providers/ProviderSettin
 import type { ProviderId } from '../../core/providers/types';
 import { parsePeriodicJobSchedule } from '../../core/scheduling/PeriodicJobSchedule';
 import { capPeriodicJobSummary } from '../../core/scheduling/PeriodicJobSummary';
+import type { PeriodicJobPartialUpdate } from '../../core/tools/HostToolCatalog';
 import type {
   ClaudianSettings,
   PeriodicJob,
@@ -89,14 +90,25 @@ export class PeriodicJobsService implements PeriodicJobsPort {
   }
 
   async update(id: string, draft: PeriodicJobDraft): Promise<PeriodicJob> {
+    return this.updatePartial(id, draft);
+  }
+
+  async updatePartial(id: string, patch: PeriodicJobPartialUpdate): Promise<PeriodicJob> {
     let committed: PeriodicJob | null = null;
     await this.settingsCoordinator.mutate((settings) => {
       const index = settings.periodicJobs.findIndex(job => job.id === id);
       if (index < 0) throw new Error(JOB_NOT_FOUND_MESSAGE);
       const previous = settings.periodicJobs[index];
+      const merged: PeriodicJobDraft = {
+        enabled: patch.enabled ?? previous.enabled,
+        name: patch.name ?? previous.name,
+        schedule: patch.schedule ?? previous.schedule,
+        prompt: patch.prompt ?? previous.prompt,
+        model: patch.model ?? previous.model,
+      };
       committed = {
         id: previous.id,
-        ...this.normalizeDraft(draft, settings),
+        ...this.normalizeDraft(merged, settings),
         lastRun: previous.lastRun,
       };
       settings.periodicJobs = settings.periodicJobs.map((job, jobIndex) => (

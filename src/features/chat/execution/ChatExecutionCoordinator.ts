@@ -324,6 +324,7 @@ export class ChatExecutionCoordinator {
       const supervised = this.supervisor.acquire(
         backend,
         {
+          hostToolAccess: 'enabled',
           lifecycle: 'persistent',
           nativePersistence: 'enabled',
           resumeSeed: conversation.resumeSeed,

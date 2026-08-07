@@ -9,6 +9,7 @@ export const PI_PROVIDER_CAPABILITIES: Readonly<ProviderCapabilities> = Object.f
   supportsProviderCommands: true,
   supportsImageAttachments: true,
   supportsInstructionMode: true,
+  supportsHostTools: false,
   supportsMcpTools: false,
   supportsTurnSteer: true,
   reasoningControl: 'effort',

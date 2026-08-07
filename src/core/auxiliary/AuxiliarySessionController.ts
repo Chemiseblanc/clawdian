@@ -66,6 +66,7 @@ export class AuxiliarySessionController {
       this.context.backend,
       {
         interactionPort: this.context.interactionPort,
+        hostToolAccess: 'disabled',
         lifecycle: 'ephemeral',
         nativePersistence: NATIVE_PERSISTENCE_BY_OWNER[this.owner],
         vaultWorkingDirectory: this.context.vaultWorkingDirectory,

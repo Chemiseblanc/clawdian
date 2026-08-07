@@ -88,6 +88,25 @@ function createHost(): any {
     app: { vault: { adapter: { basePath: '/vault' } } },
     executionLifecycleRegistry: new ProviderExecutionLifecycleRegistry(),
     getResolvedProviderCliPath: jest.fn(async () => '/bin/omp'),
+    hostTools: {
+      list: jest.fn(() => [{
+        name: 'claudian.periodic_job.list',
+        description: 'List periodic jobs.',
+        effect: 'read',
+        inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+      }, {
+        name: 'claudian.periodic_job.create',
+        description: 'Create a periodic job.',
+        effect: 'write',
+        inputSchema: { type: 'object' },
+      }, {
+        name: 'claudian.periodic_job.delete',
+        description: 'Delete a periodic job.',
+        effect: 'destructive',
+        inputSchema: { type: 'object' },
+      }]),
+      invoke: jest.fn(async () => ({ ok: true, value: { jobs: [] } })),
+    },
     settings: {
       effortLevel: 'off',
       mediaFolder: 'media',
@@ -1969,6 +1988,198 @@ describe('OmpExecutionBackend', () => {
       id: 'extension-1',
       type: 'extension_ui_response',
     });
+  });
+
+  it('registers and invokes enabled host tools through the OMP RPC bridge', async () => {
+    const harness = createHarness(createConfig({ hostToolAccess: 'enabled' }));
+    const run = harness.session.execute(createRequest());
+    const eventsPromise = collect(run.events);
+    await waitFor(() => harness.kernels[0]?.requests.some(
+      request => request.type === 'set_host_tools',
+    ) === true);
+    const kernel = harness.kernels[0];
+
+    expect(kernel.requests.find(request => request.type === 'set_host_tools')?.payload)
+      .toEqual({
+        tools: expect.arrayContaining([
+          expect.objectContaining({
+            name: 'claudian_periodic_job_list',
+            label: 'claudian.periodic_job.list',
+          }),
+        ]),
+      });
+
+    kernel.emit({
+      type: 'tool_execution_start',
+      toolCall: {
+        id: 'call-1',
+        name: 'claudian_periodic_job_list',
+        arguments: {},
+      },
+    });
+    kernel.emit({
+      type: 'host_tool_call',
+      id: 'host-call-1',
+      toolCallId: 'call-1',
+      toolName: 'claudian_periodic_job_list',
+      arguments: {},
+    });
+    await waitFor(() => kernel.sent.some(frame => frame.type === 'host_tool_result'));
+
+    expect(harness.host.hostTools.invoke).toHaveBeenCalledWith(
+      'claudian.periodic_job.list',
+      {},
+      {
+        providerId: 'omp',
+        model: 'omp:anthropic/claude-sonnet-4',
+      },
+    );
+    expect(kernel.sent).toContainEqual({
+      type: 'host_tool_result',
+      id: 'host-call-1',
+      result: {
+        content: [{ type: 'text', text: '{\n  "jobs": []\n}' }],
+        details: { jobs: [] },
+      },
+    });
+
+    kernel.emit({
+      type: 'tool_execution_end',
+      toolCallId: 'call-1',
+      result: { content: [{ type: 'text', text: '{"jobs":[]}' }] },
+    });
+    kernel.emit({ type: 'agent_end' });
+    const events = await eventsPromise;
+    expect(events).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        type: 'tool_started',
+        name: 'claudian.periodic_job.list',
+        toolCallId: 'call-1',
+      }),
+      expect.objectContaining({
+        type: 'tool_completed',
+        toolCallId: 'call-1',
+        isError: false,
+      }),
+    ]));
+  });
+
+  it('returns catalog failures as native and normalized host-tool errors', async () => {
+    const harness = createHarness(createConfig({ hostToolAccess: 'enabled' }));
+    harness.host.hostTools.invoke.mockResolvedValueOnce({
+      ok: false,
+      error: { code: 'not_found', message: 'Periodic job not found.' },
+    });
+    const run = harness.session.execute(createRequest());
+    const eventsPromise = collect(run.events);
+    await waitFor(() => harness.kernels[0]?.requests.some(
+      request => request.type === 'set_host_tools',
+    ) === true);
+    const kernel = harness.kernels[0];
+
+    kernel.emit({
+      type: 'tool_execution_start',
+      toolCall: {
+        id: 'call-error',
+        name: 'claudian_periodic_job_list',
+        arguments: {},
+      },
+    });
+    kernel.emit({
+      type: 'host_tool_call',
+      id: 'host-call-error',
+      toolCallId: 'call-error',
+      toolName: 'claudian_periodic_job_list',
+      arguments: {},
+    });
+    await waitFor(() => kernel.sent.some(frame => frame.id === 'host-call-error'));
+    expect(kernel.sent).toContainEqual({
+      type: 'host_tool_result',
+      id: 'host-call-error',
+      isError: true,
+      result: {
+        content: [{ type: 'text', text: 'Periodic job not found.' }],
+        details: {
+          error: { code: 'not_found', message: 'Periodic job not found.' },
+        },
+      },
+    });
+
+    kernel.emit({
+      type: 'tool_execution_end',
+      toolCallId: 'call-error',
+      isError: true,
+      result: { content: [{ type: 'text', text: 'Periodic job not found.' }] },
+    });
+    kernel.emit({ type: 'agent_end' });
+    const events = await eventsPromise;
+    expect(events).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        type: 'tool_started',
+        name: 'claudian.periodic_job.list',
+        toolCallId: 'call-error',
+      }),
+      expect.objectContaining({
+        type: 'tool_completed',
+        toolCallId: 'call-error',
+        isError: true,
+        content: 'Periodic job not found.',
+      }),
+    ]));
+  });
+
+  it('rejects unexpected host-tool calls after policy filtering', async () => {
+    const harness = createHarness(createConfig({ hostToolAccess: 'enabled' }));
+    const run = harness.session.execute(createRequest({
+      toolPolicy: { kind: 'read-only' },
+    }));
+    const eventsPromise = collect(run.events);
+    await waitFor(() => harness.kernels[0]?.requests.some(
+      request => request.type === 'set_host_tools',
+    ) === true);
+    const kernel = harness.kernels[0];
+
+    kernel.emit({
+      type: 'host_tool_call',
+      id: 'host-call-denied',
+      toolCallId: 'call-denied',
+      toolName: 'claudian_periodic_job_create',
+      arguments: {},
+    });
+    await waitFor(() => kernel.sent.some(frame => frame.id === 'host-call-denied'));
+
+    expect(harness.host.hostTools.invoke).not.toHaveBeenCalled();
+    expect(kernel.sent).toContainEqual({
+      type: 'host_tool_result',
+      id: 'host-call-denied',
+      isError: true,
+      result: {
+        content: [{ type: 'text', text: 'Host tool invocation is not authorized.' }],
+        details: { code: 'permission_denied' },
+      },
+    });
+    kernel.emit({ type: 'agent_end' });
+    await eventsPromise;
+  });
+
+  it('does not register host tools for compatibility and auxiliary sessions', async () => {
+    const harness = createHarness(createConfig({
+      hostToolAccess: 'disabled',
+      lifecycle: 'ephemeral',
+      nativePersistence: 'disabled-if-supported',
+    }));
+    const run = harness.session.execute(createRequest());
+    const eventsPromise = collect(run.events);
+    await waitFor(() => harness.kernels[0]?.requests.some(
+      request => request.type === 'prompt',
+    ) === true);
+    harness.kernels[0].emit({ type: 'agent_end' });
+    await eventsPromise;
+
+    expect(harness.kernels[0].requests).not.toContainEqual(expect.objectContaining({
+      type: 'set_host_tools',
+    }));
+    expect(harness.host.hostTools.list).not.toHaveBeenCalled();
   });
 
   it('does not rebuild continuity after disposal by a forced transition', async () => {

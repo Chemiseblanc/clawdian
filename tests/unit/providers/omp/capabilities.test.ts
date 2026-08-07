@@ -11,6 +11,7 @@ describe('OMP_PROVIDER_CAPABILITIES', () => {
       supportsProviderCommands: true,
       supportsImageAttachments: true,
       supportsInstructionMode: true,
+      supportsHostTools: true,
       supportsMcpTools: false,
       supportsTurnSteer: true,
       reasoningControl: 'effort',

@@ -9,6 +9,8 @@ export type ProviderNativePersistence =
   | 'disabled-if-supported'
   | 'provider-default';
 
+export type ProviderHostToolAccess = 'enabled' | 'disabled';
+
 export interface ProviderNativeResumeSeed {
   readonly providerSessionId?: string;
   readonly providerState?: Readonly<Record<string, unknown>>;
@@ -18,6 +20,11 @@ export interface ProviderNativeResumeSeed {
 export interface ProviderSessionConfig {
   readonly lifecycle: ProviderSessionLifecycle;
   readonly nativePersistence: ProviderNativePersistence;
+  /**
+   * Omitted compatibility configurations are treated as disabled.
+   * Chat session construction must opt in explicitly.
+   */
+  readonly hostToolAccess?: ProviderHostToolAccess;
   readonly resumeSeed?: ProviderNativeResumeSeed;
   readonly vaultWorkingDirectory: string;
   readonly interactionPort: ProviderInteractionPort;

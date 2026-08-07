@@ -385,6 +385,7 @@ describe('ChatExecutionCoordinator', () => {
     const backend = harness.backends.get('claude')!;
     expect(backend.sessions).toHaveLength(1);
     expect(backend.configs[0]).toMatchObject({
+      hostToolAccess: 'enabled',
       lifecycle: 'persistent',
       nativePersistence: 'enabled',
       resumeSeed: { providerSessionId: 'native-session' },

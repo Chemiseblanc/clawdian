@@ -8,6 +8,7 @@ describe('GROK_PROVIDER_CAPABILITIES', () => {
       supportsFork: true,
       supportsImageAttachments: true,
       supportsInstructionMode: true,
+      supportsHostTools: false,
       supportsMcpTools: false,
       supportsNativeHistory: true,
       supportsPlanMode: true,

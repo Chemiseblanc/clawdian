@@ -171,6 +171,52 @@ describe('PeriodicJobsService', () => {
     );
   });
 
+  it('merges partial updates atomically and preserves omitted fields and last-run metadata', async () => {
+    const lastRun = {
+      startedAt: 1,
+      completedAt: 2,
+      status: 'succeeded' as const,
+      summary: 'old',
+      trigger: 'manual' as const,
+    };
+    const harness = createHarness({ jobs: [storedJob({ lastRun })] });
+
+    const updated = await harness.service.updatePartial('job-1', {
+      enabled: false,
+      name: ' Updated ',
+    });
+
+    expect(updated).toEqual({
+      ...storedJob({ lastRun }),
+      enabled: false,
+      name: 'Updated',
+    });
+  });
+
+  it('merges concurrent partial updates from the latest serialized state', async () => {
+    const firstPersist = deferred<void>();
+    let persistCount = 0;
+    const harness = createHarness({
+      jobs: [storedJob()],
+      persist: async () => {
+        persistCount += 1;
+        if (persistCount === 1) await firstPersist.promise;
+      },
+    });
+
+    const first = harness.service.updatePartial('job-1', { name: 'Renamed' });
+    await waitFor(() => persistCount === 1);
+    const second = harness.service.updatePartial('job-1', { prompt: 'New prompt' });
+    firstPersist.resolve();
+    await Promise.all([first, second]);
+
+    expect(harness.settings.periodicJobs[0]).toEqual({
+      ...storedJob(),
+      name: 'Renamed',
+      prompt: 'New prompt',
+    });
+  });
+
   it('schedules only enabled jobs from the next future Cron registration', () => {
     const harness = createHarness({
       jobs: [storedJob(), storedJob({ id: 'disabled', enabled: false })],

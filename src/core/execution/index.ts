@@ -1,5 +1,6 @@
 export {
   type ProviderExecutionBackend,
+  type ProviderHostToolAccess,
   type ProviderNativePersistence,
   type ProviderNativeResumeSeed,
   type ProviderSessionConfig,

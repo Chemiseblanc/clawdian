@@ -217,6 +217,44 @@ describe('OmpHistoryStore', () => {
     expect(messages[0].contentBlocks).toEqual([{ toolId: 'tool-1', type: 'tool_use' }]);
   });
 
+  it('rehydrates flattened host tools with canonical names without execution', () => {
+    const content = [
+      JSON.stringify({
+        id: 'assistant-host',
+        type: 'message',
+        message: {
+          role: 'assistant',
+          content: [{
+            arguments: {},
+            id: 'host-list-1',
+            name: 'claudian_periodic_job_list',
+            type: 'toolCall',
+          }],
+        },
+      }),
+      JSON.stringify({
+        type: 'message',
+        message: {
+          content: [{ text: '{"jobs":[]}', type: 'text' }],
+          isError: false,
+          role: 'toolResult',
+          toolCallId: 'host-list-1',
+          toolName: 'claudian_periodic_job_list',
+        },
+      }),
+    ].join('\n');
+
+    const messages = parseOmpSessionContent(content);
+
+    expect(messages[0].toolCalls).toEqual([{
+      id: 'host-list-1',
+      input: {},
+      name: 'claudian.periodic_job.list',
+      result: '{"jobs":[]}',
+      status: 'completed',
+    }]);
+  });
+
   it('rehydrates Omp web extension tools with shared renderer names', () => {
     const content = [
       JSON.stringify({

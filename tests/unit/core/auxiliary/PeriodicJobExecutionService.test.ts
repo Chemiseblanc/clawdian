@@ -42,6 +42,7 @@ describe('PeriodicJobExecutionService', () => {
 
     await expect(execution).resolves.toBe('first second');
     expect(backend.configs).toEqual([expect.objectContaining({
+      hostToolAccess: 'disabled',
       lifecycle: 'ephemeral',
       nativePersistence: 'disabled-if-supported',
       vaultWorkingDirectory: '/vault',

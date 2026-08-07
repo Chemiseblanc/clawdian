@@ -5,6 +5,7 @@ import type {
   ProviderExecutionLifecycleRegistry,
   ProviderExecutionTransitionScope,
 } from '../execution';
+import type { HostToolCatalog } from '../tools/HostToolCatalog';
 import type { ClaudianSettings } from '../types';
 import type { EnvironmentScope } from '../types/settings';
 import type { ProviderCliResolutionContext, ProviderId } from './types';
@@ -21,6 +22,7 @@ export interface ProviderHost {
   readonly executionLifecycleRegistry: ProviderExecutionLifecycleRegistry;
   readonly settings: ClaudianSettings;
   readonly storage: SharedAppStorage;
+  readonly hostTools: HostToolCatalog;
   readonly manifest?: { version?: string };
 
   saveSettings(): Promise<void>;

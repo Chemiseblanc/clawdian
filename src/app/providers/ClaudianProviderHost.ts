@@ -24,6 +24,10 @@ export class ClaudianProviderHost implements ProviderHost {
     return this.plugin.storage;
   }
 
+  get hostTools() {
+    return this.plugin.hostTools;
+  }
+
   get manifest() {
     return this.plugin.manifest;
   }
