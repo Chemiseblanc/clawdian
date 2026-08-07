@@ -11,6 +11,14 @@ test('accepts matching release, package, and manifest versions', () => {
   }));
 });
 
+test('accepts a conventional v-prefixed release tag', () => {
+  assert.doesNotThrow(() => validateReleaseVersions({
+    tag: 'v2.0.31',
+    packageVersion: '2.0.31',
+    manifestVersion: '2.0.31',
+  }));
+});
+
 test('rejects version mismatches', () => {
   assert.throws(() => validateReleaseVersions({
     tag: '2.0.32',
@@ -20,7 +28,7 @@ test('rejects version mismatches', () => {
 });
 
 test('rejects malformed or missing release tags', () => {
-  for (const tag of [undefined, '', 'v2.0.31', 'refs/tags/2.0.31']) {
+  for (const tag of [undefined, '', 'refs/tags/2.0.31']) {
     assert.throws(() => validateReleaseVersions({
       tag,
       packageVersion: '2.0.31',

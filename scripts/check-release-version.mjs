@@ -5,12 +5,13 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export function validateReleaseVersions({ tag, packageVersion, manifestVersion }) {
-  if (typeof tag !== 'string' || !/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(tag)) {
+  const normalizedTag = typeof tag === 'string' && tag.startsWith('v') ? tag.slice(1) : tag;
+  if (typeof normalizedTag !== 'string' || !/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(normalizedTag)) {
     throw new Error(`Invalid or missing release tag: ${JSON.stringify(tag)}`);
   }
-  if (tag !== packageVersion || tag !== manifestVersion) {
+  if (normalizedTag !== packageVersion || normalizedTag !== manifestVersion) {
     throw new Error(
-      `Release version mismatch: tag=${tag}, package.json=${packageVersion}, manifest.json=${manifestVersion}`,
+      `Release version mismatch: tag=${normalizedTag}, package.json=${packageVersion}, manifest.json=${manifestVersion}`,
     );
   }
 }
