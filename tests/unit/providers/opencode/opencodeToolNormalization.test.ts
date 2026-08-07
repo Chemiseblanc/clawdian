@@ -1,6 +1,7 @@
 import {
   createOpencodeToolStreamAdapter,
   normalizeOpencodeToolInput,
+  normalizeOpencodeToolName,
   resolveOpencodeRawToolName,
 } from '../../../../src/providers/opencode/normalization/opencodeToolNormalization';
 
@@ -62,6 +63,13 @@ describe('normalizeOpencodeToolInput', () => {
         { activeForm: 'Drop stale task', content: 'Drop stale task', status: 'completed' },
       ],
     });
+  });
+});
+
+describe('normalizeOpencodeToolName', () => {
+  it('restores canonical Claudian host-tool names from the MCP boundary', () => {
+    expect(normalizeOpencodeToolName('claudian_periodic_job_list'))
+      .toBe('claudian.periodic_job.list');
   });
 });
 

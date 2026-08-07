@@ -265,7 +265,10 @@ export class OpencodeExecutionSession implements ProviderExecutionSession {
         await pendingDisposal;
         if (!this.isRunCurrent(run, generation)) return;
       }
-      const kernelConfigurationKey = buildKernelConfigurationKey(request);
+      const kernelConfigurationKey = buildKernelConfigurationKey(
+        request,
+        this.config.hostToolAccess,
+      );
       let kernel = this.kernel;
       let native = this.nativeInfo;
       if (
@@ -307,6 +310,9 @@ export class OpencodeExecutionSession implements ProviderExecutionSession {
         await kernel.connect({
           profile: resolveProfile(request),
           systemInstructions: request.configuration.systemInstructions,
+          model: this.resolveSelectedRawModelId(request.configuration.model)
+            ?? request.configuration.model,
+          toolPolicy: request.toolPolicy,
         });
         if (this.kernel === kernel) {
           this.kernelConfigurationKey = kernelConfigurationKey;
@@ -833,12 +839,16 @@ function resolveProfile(request: ProviderExecutionRequest): OpencodeExecutionPro
 
 function buildKernelConfigurationKey(
   request: ProviderExecutionRequest,
+  hostToolAccess: ProviderSessionConfig['hostToolAccess'],
 ): string {
   const instructions = request.configuration.systemInstructions;
   return JSON.stringify([
     resolveProfile(request),
     instructions.kind,
     instructions.kind === 'explicit' ? instructions.instructions : null,
+    request.configuration.model,
+    request.toolPolicy,
+    hostToolAccess,
   ]);
 }
 

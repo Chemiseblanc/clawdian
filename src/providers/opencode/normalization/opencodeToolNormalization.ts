@@ -18,6 +18,7 @@ import {
   type AcpResolvedToolRawName,
   AcpToolStreamAdapter,
 } from '../../acp';
+import { canonicalizeOpencodeHostToolName } from '../runtime/OpencodeHostToolAdapter';
 
 const TOOL_NAME_MAP: Record<string, string> = {
   bash: TOOL_BASH,
@@ -322,7 +323,7 @@ function normalizeWebSearchInput(input: Record<string, unknown>): Record<string,
 export function normalizeOpencodeToolName(rawName: string | undefined): string {
   const knownName = toKnownToolName(rawName);
   if (!knownName) {
-    return rawName?.trim() || 'tool';
+    return canonicalizeOpencodeHostToolName(rawName?.trim() || 'tool');
   }
 
   return TOOL_NAME_MAP[knownName];

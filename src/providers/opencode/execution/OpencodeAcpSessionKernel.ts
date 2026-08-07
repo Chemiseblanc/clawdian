@@ -6,9 +6,10 @@ import {
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 
-import type {
-  ProviderSessionConfig,
-  ProviderSystemInstructions,
+import {
+  type ProviderSessionConfig,
+  type ProviderSystemInstructions,
+  type ProviderToolPolicy,
 } from '@/core/execution';
 import type { SystemPromptSettings } from '@/core/prompt/mainAgent';
 import type { ProviderHost } from '@/core/providers/ProviderHost';
@@ -16,6 +17,7 @@ import {
   AcpClientConnection,
   AcpInteractionController,
   AcpJsonRpcTransport,
+  type AcpMcpServer,
   type AcpPermissionPresentation,
   type AcpPromptRequest,
   type AcpPromptResponse,
@@ -34,6 +36,12 @@ import {
 import { getEnhancedPath } from '@/utils/env';
 
 import {
+  buildOpencodeHostToolRegistration,
+  OPENCODE_HOST_TOOL_SERVER_NAME,
+  type OpencodeHostToolRegistration,
+} from '../runtime/OpencodeHostToolAdapter';
+import { OpencodeHostToolServer } from '../runtime/OpencodeHostToolServer';
+import {
   type OpencodeManagedAgentConfig,
   prepareOpencodeLaunchArtifacts,
 } from '../runtime/OpencodeLaunchArtifacts';
@@ -44,6 +52,8 @@ export type OpencodeExecutionProfile = 'managed' | 'passive' | 'readonly';
 export interface OpencodeKernelConnectOptions {
   readonly profile: OpencodeExecutionProfile;
   readonly systemInstructions: ProviderSystemInstructions;
+  readonly model?: string;
+  readonly toolPolicy?: ProviderToolPolicy;
 }
 
 export interface OpencodeNativeSessionInfo {
@@ -138,6 +148,9 @@ export class DefaultOpencodeAcpSessionKernel
   private process: AcpSubprocess | null = null;
   private transport: AcpJsonRpcTransport | null = null;
   private interactionController: AcpInteractionController | null = null;
+  private hostToolServer: OpencodeHostToolServer | null = null;
+  private hostToolMcpServer: AcpMcpServer | null = null;
+  private hostToolPermissionNames: ReadonlySet<string> = new Set();
   private databasePath: string | null = null;
   private profile: OpencodeExecutionProfile = 'managed';
   private disposed = false;
@@ -171,7 +184,14 @@ export class DefaultOpencodeAcpSessionKernel
   private async connectInternal(
     options: OpencodeKernelConnectOptions,
   ): Promise<void> {
-    this.profile = options.profile;
+    const hostToolRegistration = buildOpencodeHostToolRegistration(
+      this.options.plugin.hostTools,
+      options.toolPolicy ?? { kind: 'passive' },
+      this.options.config.hostToolAccess,
+    );
+    this.hostToolPermissionNames = new Set(
+      Object.keys(hostToolRegistration.canonicalNameByNativeName),
+    );
     try {
       const cliPath = await this.options.plugin
         .getResolvedProviderCliPath('opencode') ?? 'opencode';
@@ -188,7 +208,9 @@ export class DefaultOpencodeAcpSessionKernel
           ? {}
           : {
             defaultAgentId: AUX_AGENT_IDS[options.profile],
-            managedAgents: [buildAgentConfig(options.profile)],
+            managedAgents: [
+              buildAgentConfig(options.profile, hostToolRegistration),
+            ],
           }),
         runtimeEnv,
         ...(options.systemInstructions.kind === 'explicit'
@@ -217,6 +239,19 @@ export class DefaultOpencodeAcpSessionKernel
           path.isAbsolute(cliPath) ? cliPath : undefined,
         ),
       };
+      if (hostToolRegistration.definitions.length > 0) {
+        if (!options.model) {
+          throw new Error('OpenCode host tools require a selected model.');
+        }
+        const hostToolServer = new OpencodeHostToolServer({
+          catalog: this.options.plugin.hostTools,
+          model: options.model,
+          registration: hostToolRegistration,
+        });
+        this.hostToolServer = hostToolServer;
+        this.hostToolMcpServer = await hostToolServer.start();
+        this.assertNotDisposed();
+      }
       const subprocess = new AcpSubprocess({
         args: ['acp', `--cwd=${this.options.config.vaultWorkingDirectory}`],
         command: cliPath,
@@ -284,7 +319,7 @@ export class DefaultOpencodeAcpSessionKernel
       try {
         response = await connection.loadSession({
           cwd,
-          mcpServers: [],
+          mcpServers: this.hostToolMcpServer ? [this.hostToolMcpServer] : [],
           sessionId: resumeSessionId,
         });
       } catch (error) {
@@ -299,7 +334,10 @@ export class DefaultOpencodeAcpSessionKernel
       };
     }
 
-    const response = await connection.newSession({ cwd, mcpServers: [] });
+    const response = await connection.newSession({
+      cwd,
+      mcpServers: this.hostToolMcpServer ? [this.hostToolMcpServer] : [],
+    });
     return {
       configOptions: response.configOptions,
       databasePath: this.databasePath,
@@ -354,6 +392,10 @@ export class DefaultOpencodeAcpSessionKernel
     this.transport = null;
     const subprocess = this.process;
     this.process = null;
+    const hostToolServer = this.hostToolServer;
+    this.hostToolServer = null;
+    this.hostToolMcpServer = null;
+    this.hostToolPermissionNames = new Set();
 
     try {
       interactionController?.dispose();
@@ -372,6 +414,11 @@ export class DefaultOpencodeAcpSessionKernel
     }
     try {
       await subprocess?.shutdown();
+    } catch {
+      // Resource cleanup is best effort after ownership has been detached.
+    }
+    try {
+      await hostToolServer?.close();
     } catch {
       // Resource cleanup is best effort after ownership has been detached.
     }
@@ -434,7 +481,11 @@ export class DefaultOpencodeAcpSessionKernel
   private handlePermissionRequest(
     request: AcpRequestPermissionRequest,
   ): Promise<AcpRequestPermissionResponse> {
-    if (this.profile !== 'managed') {
+    const permissionId = normalizePermissionId(request.toolCall.title);
+    if (
+      this.profile !== 'managed'
+      && !this.hostToolPermissionNames.has(permissionId)
+    ) {
       return Promise.resolve(selectDeniedPermission(request));
     }
     return this.interactionController?.requestPermission(request)
@@ -723,7 +774,14 @@ function isMissingPathError(error: unknown): error is NodeJS.ErrnoException {
 
 function buildAgentConfig(
   profile: Exclude<OpencodeExecutionProfile, 'managed'>,
+  hostTools: OpencodeHostToolRegistration,
 ): OpencodeManagedAgentConfig {
+  const hostToolPermissions = Object.fromEntries(
+    hostTools.definitions.map(definition => [
+      `${OPENCODE_HOST_TOOL_SERVER_NAME}_${definition.name}`,
+      definition.effect === 'read' ? 'allow' : 'ask',
+    ]),
+  );
   return profile === 'readonly'
     ? {
       definition: {
@@ -739,6 +797,7 @@ function buildAgentConfig(
           read: READ_PERMISSION,
           webfetch: 'allow',
           websearch: 'allow',
+          ...hostToolPermissions,
         },
       },
       id: AUX_AGENT_IDS.readonly,
@@ -750,6 +809,7 @@ function buildAgentConfig(
         permission: {
           '*': 'deny',
           external_directory: 'deny',
+          ...hostToolPermissions,
         },
       },
       id: AUX_AGENT_IDS.passive,

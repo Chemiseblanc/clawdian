@@ -25,6 +25,11 @@ describe('OPENCODE_PROVIDER_CAPABILITIES', () => {
     expect(OPENCODE_PROVIDER_CAPABILITIES.supportsProviderCommands).toBe(true);
   });
 
+  it('should support host tools independently from configured MCP tools', () => {
+    expect(OPENCODE_PROVIDER_CAPABILITIES.supportsHostTools).toBe(true);
+    expect(OPENCODE_PROVIDER_CAPABILITIES.supportsMcpTools).toBe(false);
+  });
+
   it('should use effort-based reasoning control', () => {
     expect(OPENCODE_PROVIDER_CAPABILITIES.reasoningControl).toBe('effort');
   });
