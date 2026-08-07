@@ -87,6 +87,7 @@ test-results/
 sandbox/
 dev
 .context/
+.direnv/
 CLAUDE.local.md
 
 # Lock files (uncomment based on package manager)
