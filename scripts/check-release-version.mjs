@@ -11,7 +11,7 @@ export function validateReleaseVersions({ tag, packageVersion, manifestVersion }
   }
   if (normalizedTag !== packageVersion || normalizedTag !== manifestVersion) {
     throw new Error(
-      `Release version mismatch: tag=${normalizedTag}, package.json=${packageVersion}, manifest.json=${manifestVersion}`,
+      `Release version mismatch: tag=${tag}, package.json=${packageVersion}, manifest.json=${manifestVersion}`,
     );
   }
 }
