@@ -27,6 +27,12 @@
 .claudian-delete-snippet-btn:focus-visible,
 .claudian-cancel-btn:focus-visible,
 .claudian-save-btn:focus-visible,
+.claudian-periodic-job-content:focus-visible,
+.claudian-periodic-job-back:focus-visible,
+.claudian-periodic-job-new:focus-visible,
+.claudian-periodic-job-run:focus-visible,
+.claudian-periodic-job-save:focus-visible,
+.claudian-periodic-job-delete:focus-visible,
 .claudian-code-lang-label:focus-visible {
   outline: 2px solid var(--interactive-accent);
   outline-offset: 2px;

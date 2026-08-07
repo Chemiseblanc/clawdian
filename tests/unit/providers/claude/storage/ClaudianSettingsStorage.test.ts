@@ -66,6 +66,7 @@ describe('ClaudianSettingsStorage', () => {
       expect(result.lastSelectedChatModel).toBeNull();
       expect(result.enableDualPane).toBe(true);
       expect(result.dualPaneSide).toBe('right');
+      expect(result.periodicJobs).toEqual([]);
       expect(mockAdapter.read).not.toHaveBeenCalled();
     });
 
@@ -808,6 +809,186 @@ describe('ClaudianSettingsStorage', () => {
       expect(writtenContent.envSnippets[0].modelAliases).toEqual({
         'custom-model': 'Snippet model',
       });
+    });
+
+    it('round-trips valid periodic jobs in every last-run state', async () => {
+      const states = [
+        { startedAt: 1, status: 'running', summary: '', trigger: 'scheduled' },
+        {
+          startedAt: 2,
+          completedAt: 3,
+          status: 'succeeded',
+          summary: 'done',
+          trigger: 'manual',
+        },
+        {
+          startedAt: 4,
+          completedAt: 5,
+          status: 'failed',
+          summary: 'failed',
+          trigger: 'scheduled',
+        },
+        {
+          startedAt: 6,
+          completedAt: 7,
+          status: 'interrupted',
+          summary: 'closed',
+          trigger: 'manual',
+        },
+      ];
+      const periodicJobs = states.map((lastRun, index) => ({
+        id: `job-${index}`,
+        enabled: index % 2 === 0,
+        name: `Job ${index}`,
+        schedule: '0 9 * * 1-5',
+        prompt: 'Run it',
+        model: { providerId: 'claude', model: 'stale-but-owned' },
+        lastRun,
+      }));
+      mockAdapter.exists.mockResolvedValue(true);
+      mockAdapter.read.mockResolvedValue(JSON.stringify({
+        lastSelectedChatModel: null,
+        periodicJobs,
+      }));
+
+      const result = await storage.load();
+
+      expect(result.periodicJobs).toEqual(periodicJobs);
+      expect(mockAdapter.write).not.toHaveBeenCalled();
+    });
+
+    it('removes duplicate and malformed periodic jobs and re-saves normalization', async () => {
+      const valid = {
+        id: ' job-1 ',
+        enabled: true,
+        name: ' Daily note ',
+        schedule: ' 0   9 * * 1-5 ',
+        prompt: ' Summarize ',
+        model: { providerId: ' claude ', model: ' stale-model ' },
+        lastRun: null,
+      };
+      mockAdapter.exists.mockResolvedValue(true);
+      mockAdapter.read.mockResolvedValue(JSON.stringify({
+        periodicJobs: [
+          valid,
+          { ...valid, name: 'Duplicate' },
+          { ...valid, id: '', name: 'Missing id' },
+          { ...valid, id: 'job-2', schedule: '* * * * * *' },
+          { ...valid, id: 'job-3', enabled: 'yes' },
+          { ...valid, id: 'job-4', model: { providerId: 'missing', model: 'model' } },
+        ],
+      }));
+
+      const result = await storage.load();
+      const writtenContent = JSON.parse(mockAdapter.write.mock.calls[0][1]);
+
+      expect(result.periodicJobs).toEqual([{
+        id: 'job-1',
+        enabled: true,
+        name: 'Daily note',
+        schedule: '0 9 * * 1-5',
+        prompt: 'Summarize',
+        model: { providerId: 'claude', model: 'stale-model' },
+        lastRun: null,
+      }]);
+      expect(writtenContent.periodicJobs).toEqual(result.periodicJobs);
+    });
+
+    it('drops periodic jobs with invalid last-run timestamp and status combinations', async () => {
+      const validJob = {
+        id: 'job',
+        enabled: true,
+        name: 'Job',
+        schedule: '* * * * *',
+        prompt: 'Run',
+        model: { providerId: 'claude', model: 'model' },
+      };
+      mockAdapter.exists.mockResolvedValue(true);
+      mockAdapter.read.mockResolvedValue(JSON.stringify({
+        periodicJobs: [
+          { ...validJob, id: 'running-completed', lastRun: {
+            startedAt: 1,
+            completedAt: 2,
+            status: 'running',
+            summary: '',
+            trigger: 'manual',
+          } },
+          { ...validJob, id: 'terminal-incomplete', lastRun: {
+            startedAt: 1,
+            status: 'failed',
+            summary: '',
+            trigger: 'manual',
+          } },
+          { ...validJob, id: 'backwards', lastRun: {
+            startedAt: 2,
+            completedAt: 1,
+            status: 'succeeded',
+            summary: '',
+            trigger: 'scheduled',
+          } },
+          { ...validJob, id: 'bad-status', lastRun: {
+            startedAt: 1,
+            completedAt: 2,
+            status: 'pending',
+            summary: '',
+            trigger: 'manual',
+          } },
+        ],
+      }));
+
+      const result = await storage.load();
+
+      expect(result.periodicJobs).toEqual([]);
+      expect(mockAdapter.write).toHaveBeenCalled();
+    });
+
+    it('caps stored periodic job summaries at 2,000 code units', async () => {
+      mockAdapter.exists.mockResolvedValue(true);
+      mockAdapter.read.mockResolvedValue(JSON.stringify({
+        periodicJobs: [{
+          id: 'job',
+          enabled: true,
+          name: 'Job',
+          schedule: '* * * * *',
+          prompt: 'Run',
+          model: { providerId: 'claude', model: 'model' },
+          lastRun: {
+            startedAt: 1,
+            completedAt: 2,
+            status: 'succeeded',
+            summary: 'x'.repeat(2_001),
+            trigger: 'manual',
+          },
+        }],
+      }));
+
+      const result = await storage.load();
+      const summary = result.periodicJobs[0].lastRun?.summary;
+
+      expect(summary).toHaveLength(2_000);
+      expect(summary?.endsWith('…')).toBe(true);
+      expect(mockAdapter.write).toHaveBeenCalled();
+    });
+
+    it('preserves disabled-provider and stale-model periodic job selections', async () => {
+      const periodicJobs = [{
+        id: 'job',
+        enabled: false,
+        name: 'Repair later',
+        schedule: '0 9 * * *',
+        prompt: 'Run',
+        model: { providerId: 'codex', model: 'removed-model' },
+        lastRun: null,
+      }];
+      mockAdapter.exists.mockResolvedValue(true);
+      mockAdapter.read.mockResolvedValue(JSON.stringify({
+        providerConfigs: { codex: { enabled: false } },
+        periodicJobs,
+      }));
+
+      const result = await storage.load();
+
+      expect(result.periodicJobs).toEqual(periodicJobs);
     });
 
     it('should throw on JSON parse error', async () => {

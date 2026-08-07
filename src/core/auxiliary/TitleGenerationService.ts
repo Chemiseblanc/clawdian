@@ -44,12 +44,16 @@ export class TitleGenerationService implements TitleGenerationServiceContract {
 
     try {
       await controller.startRoot();
+      const model = this.options.resolveModel?.();
       const text = await controller.execute({
-        model: this.options.resolveModel?.(),
+        configuration: model ? { model } : undefined,
         prompt: buildTitleGenerationPrompt(userMessage),
-        systemPrompt: buildTitleGenerationSystemPrompt(
-          this.options.resolveLocale?.(),
-        ),
+        systemInstructions: {
+          instructions: buildTitleGenerationSystemPrompt(
+            this.options.resolveLocale?.(),
+          ),
+          kind: 'explicit',
+        },
       });
       const title = parseTitleGenerationResponse(text);
       await this.safeCallback(

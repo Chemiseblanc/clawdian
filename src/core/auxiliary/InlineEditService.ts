@@ -76,9 +76,12 @@ export class InlineEditService implements InlineEditServiceContract {
   private async sendMessage(prompt: string): Promise<InlineEditResult> {
     try {
       const text = await this.controller.execute({
-        model: this.modelOverride,
+        configuration: this.modelOverride ? { model: this.modelOverride } : undefined,
         prompt,
-        systemPrompt: getInlineEditSystemPrompt(),
+        systemInstructions: {
+          instructions: getInlineEditSystemPrompt(),
+          kind: 'explicit',
+        },
       });
       this.hasConversation = true;
       return parseInlineEditResponse(text);

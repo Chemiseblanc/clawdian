@@ -105,6 +105,7 @@ describe('types.ts', () => {
         envSnippets: [],
         customContextLimits: {},
         customModelAliases: {},
+        periodicJobs: [],
         systemPrompt: '',
 
         persistentExternalContextPaths: [],
@@ -162,6 +163,7 @@ describe('types.ts', () => {
         envSnippets: [],
         customContextLimits: {},
         customModelAliases: {},
+        periodicJobs: [],
         systemPrompt: '',
 
         persistentExternalContextPaths: [],
@@ -220,6 +222,7 @@ describe('types.ts', () => {
         envSnippets: [],
         customContextLimits: {},
         customModelAliases: {},
+        periodicJobs: [],
         systemPrompt: '',
 
         persistentExternalContextPaths: [],

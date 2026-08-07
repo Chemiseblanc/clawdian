@@ -7,10 +7,12 @@ import './providers';
 
 StartupProfiler.finishModuleEvaluation();
 
+import { Cron } from 'croner';
 import type { Editor, TAbstractFile, WorkspaceLeaf } from 'obsidian';
 import { MarkdownView, Notice, Plugin, TFolder } from 'obsidian';
 
 import { ConversationRepository } from './app/conversations/ConversationRepository';
+import { PeriodicJobsService } from './app/jobs/PeriodicJobsService';
 import { ClaudianProviderHost } from './app/providers/ClaudianProviderHost';
 import { ChatModelSelectionCoordinator } from './app/settings/ChatModelSelectionCoordinator';
 import { DEFAULT_CLAUDIAN_SETTINGS } from './app/settings/defaultSettings';
@@ -131,6 +133,7 @@ export default class ClaudianPlugin extends Plugin {
   readonly warmExecutionPool = new WarmExecutionPool(
     () => this.settings?.maxWarmAgentProcesses ?? DEFAULT_MAX_WARM_AGENT_PROCESSES,
   );
+  private periodicJobsService: PeriodicJobsService | null = null;
   private settingsCoordinator!: SettingsCoordinator<ClaudianSettings>;
   private chatModelSelectionCoordinator!: ChatModelSelectionCoordinator;
   private pinnedLinkedNotePaths!: PinnedLinkedNotePathCoordinator;
@@ -155,6 +158,13 @@ export default class ClaudianPlugin extends Plugin {
     return this.chatModelSelectionCoordinator;
   }
 
+  get periodicJobs(): PeriodicJobsService {
+    if (!this.periodicJobsService) {
+      throw new Error('Periodic jobs are unavailable before settings load.');
+    }
+    return this.periodicJobsService;
+  }
+
   async onload() {
     StartupProfiler.startOnload();
     try {
@@ -162,6 +172,7 @@ export default class ClaudianPlugin extends Plugin {
         'settings-load',
         () => this.loadSettings({ deferNonRestoredSessionMetadata: true }),
       );
+      this.periodicJobs.start();
       // Provider workspace services are initialized lazily on first use.
 
       this.registerView(
@@ -321,8 +332,21 @@ export default class ClaudianPlugin extends Plugin {
     void Promise.all(
       this.getAllViews().map(view => view.flushCurrentTabState()),
     ).catch(() => undefined);
-    void this.executionLifecycleRegistry.dispose();
-    void ProviderWorkspaceRegistry.disposeInitialized();
+    void this.disposeProviderResourcesInOrder().catch(() => undefined);
+  }
+
+  private async disposeProviderResourcesInOrder(): Promise<void> {
+    try {
+      if (this.periodicJobsService) {
+        await this.periodicJobsService.stop();
+      }
+    } finally {
+      try {
+        await this.executionLifecycleRegistry.dispose();
+      } finally {
+        await ProviderWorkspaceRegistry.disposeInitialized();
+      }
+    }
   }
 
   async activateView() {
@@ -424,6 +448,29 @@ export default class ClaudianPlugin extends Plugin {
         await this.storage.saveClaudianSettings(settings);
       },
     );
+    this.periodicJobsService = new PeriodicJobsService(
+      this.settingsCoordinator,
+      () => this.settings,
+      this.providerHost,
+      {
+        clock: { now: () => Date.now() },
+        createSchedule: (pattern, callback, onError) => {
+          const schedule = new Cron(pattern, {
+            catch: onError,
+            protect: true,
+          }, callback);
+          return { stop: () => schedule.stop() };
+        },
+        initializeProvider: providerId => ProviderWorkspaceRegistry.ensureInitialized(
+          this.providerHost,
+          providerId,
+          'periodic-job',
+        ),
+        createExecutionService: providerId => (
+          ProviderRegistry.createPeriodicJobExecutionService(this.providerHost, providerId)
+        ),
+      },
+    );
     this.chatModelSelectionCoordinator = new ChatModelSelectionCoordinator(
       this.settingsCoordinator,
     );
@@ -468,6 +515,7 @@ export default class ClaudianPlugin extends Plugin {
       this.settings,
     );
     const didNormalizeModelVariants = this.normalizeModelVariantSettings();
+    await this.periodicJobs.reconcileInterruptedRuns();
 
     const deferRemainingMetadata = options.deferNonRestoredSessionMetadata === true;
     const initialMetadataScan = await StartupProfiler.runAsync(

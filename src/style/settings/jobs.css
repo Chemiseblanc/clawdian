@@ -1,0 +1,109 @@
+.claudian-periodic-jobs-header h3,
+.claudian-periodic-job-detail-header h3 {
+  margin: 0;
+}
+
+.claudian-periodic-job-new,
+.claudian-periodic-job-run {
+  width: auto;
+  min-width: max-content;
+  padding: 0 10px;
+}
+
+.claudian-periodic-job-content {
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.claudian-periodic-job-enabled {
+  padding: 1px 6px;
+  border-radius: 999px;
+  color: var(--text-muted);
+  background: var(--background-modifier-border);
+  font-size: var(--font-ui-smaller);
+}
+
+.claudian-periodic-job-enabled--on {
+  color: var(--text-success);
+}
+
+.claudian-periodic-job-status {
+  margin-top: 4px;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  font-weight: var(--font-medium);
+}
+
+.claudian-periodic-job-summary {
+  display: -webkit-box;
+  overflow: hidden;
+  margin-top: 4px;
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.claudian-periodic-job-detail-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.claudian-periodic-job-back {
+  width: auto;
+  padding: 0 8px;
+}
+
+.claudian-periodic-job-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.claudian-periodic-job-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--text-normal);
+  font-size: var(--font-ui-small);
+  font-weight: var(--font-medium);
+}
+
+.claudian-periodic-job-field input[type="text"],
+.claudian-periodic-job-field select,
+.claudian-periodic-job-prompt {
+  width: 100%;
+}
+
+.claudian-periodic-job-prompt {
+  resize: vertical;
+  font-family: var(--font-text);
+}
+
+.claudian-periodic-job-toggle {
+  flex-direction: row;
+  align-items: center;
+}
+
+.claudian-periodic-job-error {
+  margin-top: 10px;
+}
+
+.claudian-periodic-job-detail-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.claudian-periodic-job-runtime {
+  margin-top: 16px;
+  padding: 12px;
+  border-radius: 6px;
+  background: var(--background-secondary);
+}
+
+.claudian-periodic-job-runtime .claudian-periodic-job-run {
+  margin-top: 10px;
+}

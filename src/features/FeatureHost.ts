@@ -7,6 +7,8 @@ import type {
   ClaudianSettings,
   Conversation,
   ConversationMeta,
+  PeriodicJob,
+  PeriodicJobDraft,
   StoredChatModelSelection,
 } from '../core/types';
 import type { ChatExecutionPersistence } from './chat/execution/ChatExecutionCoordinator';
@@ -41,6 +43,17 @@ export interface ChatModelSelectionPort {
   ): Promise<boolean>;
 }
 
+export interface PeriodicJobsPort {
+  list(): readonly PeriodicJob[];
+  create(draft: PeriodicJobDraft): Promise<PeriodicJob>;
+  update(id: string, draft: PeriodicJobDraft): Promise<PeriodicJob>;
+  delete(id: string): Promise<void>;
+  runNow(id: string): Promise<void>;
+  setEnabled(id: string, enabled: boolean): Promise<void>;
+  isRunning(id: string): boolean;
+  subscribe(listener: () => void): () => void;
+}
+
 /** Application capabilities consumed by user-facing features. */
 export interface FeatureHost {
   readonly app: App;
@@ -48,6 +61,7 @@ export interface FeatureHost {
   readonly executionPersistence: ChatExecutionPersistence;
   readonly providerHost: ProviderHost;
   readonly settings: ClaudianSettings;
+  readonly periodicJobs: PeriodicJobsPort;
   readonly storage: SharedAppStorage;
   readonly warmExecutionPool: WarmExecutionPool;
 

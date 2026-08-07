@@ -23,6 +23,7 @@ import {
 import type { FeatureHost } from '../FeatureHost';
 import { AgentSkillManagementCoordinator } from './AgentSkillManagementCoordinator';
 import { buildNavMappingText, parseNavMappings } from './keyboardNavigation';
+import { PeriodicJobSettings } from './ui/PeriodicJobSettings';
 
 type SettingsTabId = string;
 type ObsidianHotkey = { modifiers: string[]; key: string };
@@ -118,6 +119,7 @@ export class ClaudianSettingTab extends PluginSettingTab {
   private refreshTitleModelOptions: (() => void) | null = null;
   private displayGeneration = 0;
   private readonly agentSkillCoordinator: AgentSkillManagementCoordinator;
+  private periodicJobSettings: PeriodicJobSettings | null = null;
 
   constructor(app: App, plugin: FeatureHost & Plugin) {
     super(app, plugin);
@@ -140,6 +142,8 @@ export class ClaudianSettingTab extends PluginSettingTab {
   display(): void {
     const displayGeneration = ++this.displayGeneration;
     this.agentSkillCoordinator.resetSubscriptions();
+    this.periodicJobSettings?.dispose();
+    this.periodicJobSettings = null;
     const { containerEl } = this;
     containerEl.empty();
     containerEl.addClass('claudian-settings');
@@ -148,7 +152,7 @@ export class ClaudianSettingTab extends PluginSettingTab {
     setLocale(this.plugin.settings.locale as Locale);
 
     const providerTabs = ProviderRegistry.getRegisteredProviderIds();
-    const tabIds: SettingsTabId[] = ['general', ...providerTabs];
+    const tabIds: SettingsTabId[] = ['general', 'jobs', ...providerTabs];
     if (!tabIds.includes(this.activeTab)) {
       this.activeTab = 'general';
     }
@@ -225,7 +229,9 @@ export class ClaudianSettingTab extends PluginSettingTab {
     for (const id of tabIds) {
       const label = id === 'general'
         ? t('settings.tabs.general')
-        : ProviderRegistry.getProviderDisplayName(id);
+        : id === 'jobs'
+          ? t('settings.tabs.jobs')
+          : ProviderRegistry.getProviderDisplayName(id);
       const button = tabBar.createEl('button', {
         cls: `claudian-settings-tab${id === this.activeTab ? ' claudian-settings-tab--active' : ''}`,
         text: label,
@@ -236,7 +242,7 @@ export class ClaudianSettingTab extends PluginSettingTab {
           tabButtons.get(tabId)?.toggleClass('claudian-settings-tab--active', tabId === id);
           tabContents.get(tabId)?.toggleClass('claudian-settings-tab-content--active', tabId === id);
         }
-        if (id !== 'general') {
+        if (providerTabs.includes(id)) {
           void renderProviderTab(id);
         }
       });
@@ -251,8 +257,12 @@ export class ClaudianSettingTab extends PluginSettingTab {
     }
 
     this.renderGeneralTab(tabContents.get('general')!);
+    this.periodicJobSettings = new PeriodicJobSettings(
+      tabContents.get('jobs')!,
+      this.plugin,
+    );
 
-    if (this.activeTab !== 'general') {
+    if (providerTabs.includes(this.activeTab)) {
       void renderProviderTab(this.activeTab);
     }
   }

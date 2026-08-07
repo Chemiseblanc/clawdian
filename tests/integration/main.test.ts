@@ -1,6 +1,7 @@
 
 import { TFile, TFolder } from 'obsidian';
 
+import { PeriodicJobsService } from '@/app/jobs/PeriodicJobsService';
 import { ConversationPersistenceStore } from '@/core/bootstrap/ConversationPersistenceStore';
 import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
 import { ProviderSettingsCoordinator } from '@/core/providers/ProviderSettingsCoordinator';
@@ -1090,6 +1091,27 @@ describe('ClaudianPlugin', () => {
         .toEqual(expect.any(Number));
     });
 
+    it('reconciles stale jobs before registering future schedules', async () => {
+      const calls: string[] = [];
+      const reconcile = jest.spyOn(
+        PeriodicJobsService.prototype,
+        'reconcileInterruptedRuns',
+      ).mockImplementation(async () => {
+        calls.push('reconcile');
+      });
+      const start = jest.spyOn(PeriodicJobsService.prototype, 'start')
+        .mockImplementation(() => {
+          expect(plugin.settings).toBeDefined();
+          calls.push('start');
+        });
+
+      await plugin.onload();
+
+      expect(calls).toEqual(['reconcile', 'start']);
+      reconcile.mockRestore();
+      start.mockRestore();
+    });
+
   });
 
   describe('onunload', () => {
@@ -1108,8 +1130,36 @@ describe('ClaudianPlugin', () => {
 
       plugin.onunload();
       await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
 
       expect(disposeSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it('stops jobs before disposing lifecycle and provider workspaces', async () => {
+      await plugin.onload();
+      const calls: string[] = [];
+      const stop = jest.spyOn(plugin.periodicJobs, 'stop').mockImplementation(async () => {
+        calls.push('jobs');
+      });
+      const lifecycle = jest.spyOn(plugin.executionLifecycleRegistry, 'dispose')
+        .mockImplementation(async () => {
+          calls.push('lifecycle');
+        });
+      const workspaces = jest.spyOn(ProviderWorkspaceRegistry, 'disposeInitialized')
+        .mockImplementation(async () => {
+          calls.push('workspaces');
+        });
+
+      plugin.onunload();
+      for (let index = 0; index < 6; index += 1) {
+        await Promise.resolve();
+      }
+
+      expect(calls).toEqual(['jobs', 'lifecycle', 'workspaces']);
+      stop.mockRestore();
+      lifecycle.mockRestore();
+      workspaces.mockRestore();
     });
 
     it('flushes the current tab identity when views are not closed first', async () => {

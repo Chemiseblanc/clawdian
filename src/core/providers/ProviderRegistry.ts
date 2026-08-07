@@ -1,6 +1,7 @@
 import { getVaultPath } from '../../utils/path';
 import { InlineEditService as SharedInlineEditService } from '../auxiliary/InlineEditService';
 import { InstructionRefineService as SharedInstructionRefineService } from '../auxiliary/InstructionRefineService';
+import { PeriodicJobExecutionService } from '../auxiliary/PeriodicJobExecutionService';
 import { TitleGenerationService as SharedTitleGenerationService } from '../auxiliary/TitleGenerationService';
 import type {
   ProviderExecutionBackend,
@@ -108,6 +109,15 @@ export class ProviderRegistry {
 
   static createInlineEditService(plugin: ProviderHost, providerId: ProviderId = DEFAULT_CHAT_PROVIDER_ID): InlineEditService {
     return new SharedInlineEditService(
+      this.createAuxiliaryExecutionContext(plugin, providerId),
+    );
+  }
+
+  static createPeriodicJobExecutionService(
+    plugin: ProviderHost,
+    providerId: ProviderId,
+  ): PeriodicJobExecutionService {
+    return new PeriodicJobExecutionService(
       this.createAuxiliaryExecutionContext(plugin, providerId),
     );
   }

@@ -25,6 +25,7 @@ export const DEFAULT_CLAUDIAN_SETTINGS: ClaudianSettings = {
   envSnippets: [],
   customContextLimits: {},
   customModelAliases: {},
+  periodicJobs: [],
 
   keyboardNavigation: {
     scrollUpKey: 'w',

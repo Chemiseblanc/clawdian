@@ -112,6 +112,35 @@ export interface StoredChatModelSelection {
   model: string;
 }
 
+export type PeriodicJobRunStatus = 'running' | 'succeeded' | 'failed' | 'interrupted';
+export type PeriodicJobRunTrigger = 'manual' | 'scheduled';
+
+export interface PeriodicJobLastRun {
+  startedAt: number;
+  completedAt?: number;
+  status: PeriodicJobRunStatus;
+  summary: string;
+  trigger: PeriodicJobRunTrigger;
+}
+
+export interface PeriodicJob {
+  id: string;
+  enabled: boolean;
+  name: string;
+  schedule: string;
+  prompt: string;
+  model: StoredChatModelSelection;
+  lastRun: PeriodicJobLastRun | null;
+}
+
+export interface PeriodicJobDraft {
+  enabled: boolean;
+  name: string;
+  schedule: string;
+  prompt: string;
+  model: StoredChatModelSelection;
+}
+
 /**
  * Application settings stored in .claudian/claudian-settings.json.
  *
@@ -146,6 +175,7 @@ export interface ClaudianSettings {
   envSnippets: EnvSnippet[];
   customContextLimits: Record<string, number>;
   customModelAliases: Record<string, string>;
+  periodicJobs: PeriodicJob[];
 
   // UI settings
   keyboardNavigation: KeyboardNavigationSettings;

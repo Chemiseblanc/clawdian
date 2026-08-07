@@ -6,6 +6,8 @@ import {
   TEST_CODEX_MODEL_LABEL,
 } from '@test/helpers/codexModels';
 
+import { ProviderExecutionLifecycleRegistry } from '@/core/execution';
+import type { ProviderHost } from '@/core/providers/ProviderHost';
 import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
 import { ProviderWorkspaceRegistry } from '@/core/providers/ProviderWorkspaceRegistry';
 import type {
@@ -14,6 +16,11 @@ import type {
   TitleGenerationResult,
   TitleGenerationService,
 } from '@/core/providers/types';
+
+import {
+  FakeAuxiliaryBackend,
+  waitFor,
+} from '../auxiliary/AuxiliaryExecutionTestHarness';
 
 describe('ProviderRegistry', () => {
   beforeEach(() => {
@@ -404,6 +411,56 @@ describe('ProviderRegistry', () => {
       title: 'codex title',
     });
   });
+  it('creates periodic job execution with passive interactions and releases its lease', async () => {
+    const backend = new FakeAuxiliaryBackend();
+    jest.spyOn(ProviderRegistry, 'createExecutionBackend').mockReturnValue(backend);
+    const host = {
+      app: { vault: { adapter: { basePath: '/vault' } } },
+      executionLifecycleRegistry: new ProviderExecutionLifecycleRegistry(),
+    } as unknown as ProviderHost;
+    const service = ProviderRegistry.createPeriodicJobExecutionService(host, 'claude');
+
+    const execution = service.execute({
+      model: 'job-model',
+      permissionMode: 'normal',
+      prompt: 'Run',
+    });
+    await waitFor(() => backend.sessions[0]?.requests.length === 1);
+    const interactionPort = backend.configs[0].interactionPort;
+    const signal = new AbortController().signal;
+    const approval = await interactionPort.requestApproval({
+      description: 'Approve',
+      input: {},
+      interactionId: 'approval',
+      kind: 'approval',
+      sessionInstanceId: 'session',
+      toolName: 'Tool',
+      turnId: 'turn',
+    }, signal);
+    const question = await interactionPort.askUserQuestion({
+      input: {},
+      interactionId: 'question',
+      kind: 'question',
+      sessionInstanceId: 'session',
+      turnId: 'turn',
+    }, signal);
+    const plan = await interactionPort.requestPlanDecision({
+      input: {},
+      interactionId: 'plan',
+      kind: 'plan-decision',
+      sessionInstanceId: 'session',
+      turnId: 'turn',
+    }, signal);
+    backend.sessions[0].emitText('done');
+    backend.sessions[0].complete();
+
+    await expect(execution).resolves.toBe('done');
+    expect(approval).toEqual({ decision: 'cancel', interactionId: 'approval' });
+    expect(question).toEqual({ answers: null, interactionId: 'question' });
+    expect(plan).toEqual({ decision: null, interactionId: 'plan' });
+    expect(backend.sessions[0].disposeCalls).toBe(1);
+  });
+
 });
 
 function createMockTitleService(providerId: ProviderId): TitleGenerationService {

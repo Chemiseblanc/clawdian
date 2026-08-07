@@ -1,26 +1,29 @@
 import type {
+  ProviderExecutionConfiguration,
   ProviderExecutionRequest,
   ProviderExecutionRun,
   ProviderExecutionSessionLease,
   ProviderNativePersistence,
+  ProviderSystemInstructions,
   ProviderToolPolicy,
 } from '../execution';
 import type { AuxiliaryExecutionContext } from './AuxiliaryExecutionContext';
 import { TextResponseCollector } from './TextResponseCollector';
 
 export interface AuxiliaryRequest {
-  readonly model?: string;
+  readonly configuration?: Omit<ProviderExecutionConfiguration, 'systemInstructions'>;
   readonly onProgress?: (text: string) => void;
   readonly prompt: string;
-  readonly systemPrompt: string;
+  readonly systemInstructions: ProviderSystemInstructions;
 }
 
-type AuxiliaryExecutionOwner = 'title' | 'instruction' | 'inline-edit';
+type AuxiliaryExecutionOwner = 'title' | 'instruction' | 'inline-edit' | 'periodic-job';
 
 const NATIVE_PERSISTENCE_BY_OWNER = {
   title: 'disabled-if-supported',
   instruction: 'provider-default',
   'inline-edit': 'provider-default',
+  'periodic-job': 'disabled-if-supported',
 } as const satisfies Record<
   AuxiliaryExecutionOwner,
   ProviderNativePersistence
@@ -96,11 +99,8 @@ export class AuxiliarySessionController {
     const abortController = new AbortController();
     const executionRequest: ProviderExecutionRequest = {
       configuration: {
-        ...(request.model ? { model: request.model } : {}),
-        systemInstructions: {
-          instructions: request.systemPrompt,
-          kind: 'explicit',
-        },
+        ...request.configuration,
+        systemInstructions: request.systemInstructions,
       },
       input: [{ text: request.prompt, type: 'text' }],
       signal: abortController.signal,

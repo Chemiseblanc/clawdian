@@ -84,14 +84,17 @@ implements InstructionRefineServiceContract {
   ): Promise<InstructionRefineResult> {
     try {
       const text = await this.controller.execute({
-        model: this.modelOverride,
+        configuration: this.modelOverride ? { model: this.modelOverride } : undefined,
         onProgress: onProgress
           ? accumulated => onProgress(
             parseInstructionRefineResponse(accumulated),
           )
           : undefined,
         prompt,
-        systemPrompt: buildRefineSystemPrompt(this.existingInstructions),
+        systemInstructions: {
+          instructions: buildRefineSystemPrompt(this.existingInstructions),
+          kind: 'explicit',
+        },
       });
       this.hasConversation = true;
       return parseInstructionRefineResponse(text);

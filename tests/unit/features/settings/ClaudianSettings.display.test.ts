@@ -1,3 +1,7 @@
+/** @jest-environment jsdom */
+import '@/providers';
+
+
 const mockRenderedSettingNames: string[] = [];
 const mockToggleChanges = new Map<string, (value: boolean) => Promise<void>>();
 
@@ -96,7 +100,9 @@ jest.mock('obsidian', () => {
 });
 
 import { DEFAULT_CLAUDIAN_SETTINGS } from '@/app/settings/defaultSettings';
+import { ProviderWorkspaceRegistry } from '@/core/providers/ProviderWorkspaceRegistry';
 import { ClaudianSettingTab } from '@/features/settings/ClaudianSettings';
+import { PeriodicJobSettings } from '@/features/settings/ui/PeriodicJobSettings';
 import { t } from '@/i18n/i18n';
 
 function createTab(enableDualPane: boolean): {
@@ -105,6 +111,17 @@ function createTab(enableDualPane: boolean): {
 } {
   const settings = { ...DEFAULT_CLAUDIAN_SETTINGS, enableDualPane };
   const plugin = {
+    app: {},
+    periodicJobs: {
+      list: jest.fn(() => []),
+      create: jest.fn(),
+      update: jest.fn(),
+      delete: jest.fn(),
+      runNow: jest.fn(),
+      setEnabled: jest.fn(),
+      isRunning: jest.fn(() => false),
+      subscribe: jest.fn(() => jest.fn()),
+    },
     settings,
     mutateSettings: jest.fn(async (mutation: (value: typeof settings) => void) => {
       mutation(settings);
@@ -145,6 +162,32 @@ function createContainer(): Record<string, jest.Mock> {
   return element;
 }
 
+beforeAll(() => {
+  if (!Reflect.has(HTMLElement.prototype, 'empty')) {
+    HTMLElement.prototype.empty = function empty(): void {
+      this.replaceChildren();
+    };
+  }
+  if (!Reflect.has(HTMLElement.prototype, 'addClass')) {
+    HTMLElement.prototype.addClass = function addClass(...classes: string[]): void {
+      this.classList.add(...classes);
+    };
+  }
+  if (!Reflect.has(HTMLElement.prototype, 'toggleClass')) {
+    HTMLElement.prototype.toggleClass = function toggleClass(
+      className: string,
+      value: boolean,
+    ): void {
+      this.classList.toggle(className, value);
+    };
+  }
+  if (!Reflect.has(HTMLElement.prototype, 'setText')) {
+    HTMLElement.prototype.setText = function setText(value: string): void {
+      this.textContent = value;
+    };
+  }
+});
+
 describe('ClaudianSettingTab display settings', () => {
   beforeEach(() => {
     mockRenderedSettingNames.length = 0;
@@ -174,4 +217,40 @@ describe('ClaudianSettingTab display settings', () => {
     expect(plugin.settings.enableDualPane).toBe(false);
     expect(display).toHaveBeenCalledTimes(1);
   });
+  it('orders General, Jobs, and provider tabs without initializing Jobs as a provider', () => {
+    const { tab } = createTab(true);
+    const container = document.createElement('div');
+    tab.containerEl = container;
+    const initialize = jest.spyOn(ProviderWorkspaceRegistry, 'ensureInitialized')
+      .mockResolvedValue(undefined);
+
+    tab.display();
+    const labels = Array.from(
+      container.querySelectorAll<HTMLButtonElement>('.claudian-settings-tab'),
+      button => button.textContent,
+    );
+    const jobsButton = Array.from(
+      container.querySelectorAll<HTMLButtonElement>('.claudian-settings-tab'),
+    ).find(button => button.textContent === t('settings.tabs.jobs'))!;
+    jobsButton.click();
+
+    expect(labels.slice(0, 3)).toEqual([
+      t('settings.tabs.general'),
+      t('settings.tabs.jobs'),
+      'Claude',
+    ]);
+    expect(initialize).not.toHaveBeenCalled();
+  });
+
+  it('disposes the previous Jobs renderer before a second display', () => {
+    const { tab } = createTab(true);
+    tab.containerEl = document.createElement('div');
+    const dispose = jest.spyOn(PeriodicJobSettings.prototype, 'dispose');
+
+    tab.display();
+    tab.display();
+
+    expect(dispose).toHaveBeenCalledTimes(1);
+  });
+
 });

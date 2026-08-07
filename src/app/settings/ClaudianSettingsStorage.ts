@@ -12,6 +12,8 @@ import {
   resolveEnvironmentSnippetScope,
 } from '../../core/providers/providerEnvironment';
 import { ProviderRegistry } from '../../core/providers/ProviderRegistry';
+import { parsePeriodicJobSchedule } from '../../core/scheduling/PeriodicJobSchedule';
+import { capPeriodicJobSummary } from '../../core/scheduling/PeriodicJobSummary';
 import type { VaultFileAdapter } from '../../core/storage/VaultFileAdapter';
 import {
   CHAT_VIEW_PLACEMENTS,
@@ -22,6 +24,8 @@ import {
   type EnvironmentScope,
   type EnvSnippet,
   type HiddenProviderCommands,
+  type PeriodicJob,
+  type PeriodicJobLastRun,
   type ProviderConfigMap,
   type StoredChatModelSelection,
 } from '../../core/types/settings';
@@ -323,6 +327,112 @@ function normalizeStoredChatModelSelection(
   return { providerId, model };
 }
 
+function normalizePeriodicJobLastRun(value: unknown): PeriodicJobLastRun | null | undefined {
+  if (value === null) {
+    return null;
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
+  }
+
+  const candidate = value as Record<string, unknown>;
+  if (
+    typeof candidate.startedAt !== 'number'
+    || !Number.isFinite(candidate.startedAt)
+    || candidate.startedAt <= 0
+    || typeof candidate.summary !== 'string'
+    || (candidate.trigger !== 'manual' && candidate.trigger !== 'scheduled')
+    || !['running', 'succeeded', 'failed', 'interrupted'].includes(
+      typeof candidate.status === 'string' ? candidate.status : '',
+    )
+  ) {
+    return undefined;
+  }
+
+  const status = candidate.status as PeriodicJobLastRun['status'];
+  if (status === 'running') {
+    if ('completedAt' in candidate) {
+      return undefined;
+    }
+    return {
+      startedAt: candidate.startedAt,
+      status,
+      summary: capPeriodicJobSummary(candidate.summary),
+      trigger: candidate.trigger,
+    };
+  }
+
+  if (
+    typeof candidate.completedAt !== 'number'
+    || !Number.isFinite(candidate.completedAt)
+    || candidate.completedAt <= 0
+    || candidate.completedAt < candidate.startedAt
+  ) {
+    return undefined;
+  }
+
+  return {
+    startedAt: candidate.startedAt,
+    completedAt: candidate.completedAt,
+    status,
+    summary: capPeriodicJobSummary(candidate.summary),
+    trigger: candidate.trigger,
+  };
+}
+
+function normalizePeriodicJobs(value: unknown): PeriodicJob[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const jobs: PeriodicJob[] = [];
+  const ids = new Set<string>();
+  for (const item of value) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) {
+      continue;
+    }
+
+    const candidate = item as Record<string, unknown>;
+    const id = trimStoredString(candidate.id);
+    const name = trimStoredString(candidate.name);
+    const prompt = trimStoredString(candidate.prompt);
+    const model = normalizeStoredChatModelSelection(candidate.model);
+    const lastRun = normalizePeriodicJobLastRun(candidate.lastRun);
+    if (
+      !id
+      || ids.has(id)
+      || typeof candidate.enabled !== 'boolean'
+      || !name
+      || !prompt
+      || !model
+      || lastRun === undefined
+      || typeof candidate.schedule !== 'string'
+    ) {
+      continue;
+    }
+
+    let schedule: string;
+    try {
+      schedule = parsePeriodicJobSchedule(candidate.schedule);
+    } catch {
+      continue;
+    }
+
+    ids.add(id);
+    jobs.push({
+      id,
+      enabled: candidate.enabled,
+      name,
+      schedule,
+      prompt,
+      model,
+      lastRun,
+    });
+  }
+
+  return jobs;
+}
+
 function migrateLegacyChatModelSelection(
   stored: Record<string, unknown>,
 ): StoredChatModelSelection | null {
@@ -372,6 +482,7 @@ export class ClaudianSettingsStorage {
     );
     const envSnippets = normalizeEnvSnippets(stored.envSnippets);
     const customModelAliases = normalizeModelAliases(stored.customModelAliases);
+    const periodicJobs = normalizePeriodicJobs(stored.periodicJobs);
     const {
       changed: didStripRuntimeProviderConfig,
       providerConfigs,
@@ -396,6 +507,7 @@ export class ClaudianSettingsStorage {
       sharedEnvironmentVariables: getSharedEnvironmentVariables(legacyProviderSettings),
       envSnippets,
       customModelAliases,
+      periodicJobs,
       hiddenProviderCommands,
       providerConfigs,
       chatViewPlacement,
@@ -436,6 +548,7 @@ export class ClaudianSettingsStorage {
       || shouldPersistChatViewPlacementMigration(stored, chatViewPlacement)
       || shouldPersistDualPaneNormalization(stored, enableDualPane, dualPaneSide)
       || JSON.stringify(envSnippets) !== JSON.stringify(stored.envSnippets ?? [])
+      || JSON.stringify(periodicJobs) !== JSON.stringify(stored.periodicJobs ?? [])
       || (
         'customModelAliases' in stored
         && JSON.stringify(customModelAliases) !== JSON.stringify(stored.customModelAliases ?? {})
