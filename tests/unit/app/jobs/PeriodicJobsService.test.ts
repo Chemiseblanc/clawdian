@@ -70,6 +70,7 @@ function createHarness(options: {
   persist?: (settings: typeof DEFAULT_CLAUDIAN_SETTINGS) => Promise<void>;
   initializeProvider?: () => Promise<void>;
   runner?: FakeRunner;
+  findPreviousScheduledRun?: (pattern: string, before: number) => number | null;
 } = {}) {
   let now = 100;
   const settings = structuredClone(DEFAULT_CLAUDIAN_SETTINGS);
@@ -78,6 +79,9 @@ function createHarness(options: {
   const schedules: ScheduleRecord[] = [];
   const runner = options.runner ?? new FakeRunner();
   const initializeProvider = jest.fn(options.initializeProvider ?? (async () => undefined));
+  const findPreviousScheduledRun = jest.fn(
+    options.findPreviousScheduledRun ?? (() => null),
+  );
   const createExecutionService = jest.fn(() => (
     runner as unknown as PeriodicJobExecutionService
   ));
@@ -93,11 +97,13 @@ function createHarness(options: {
         schedules.push(record);
         return record;
       },
+      findPreviousScheduledRun,
       initializeProvider,
       createExecutionService,
     },
   );
   return {
+    findPreviousScheduledRun,
     createExecutionService,
     initializeProvider,
     persist,
@@ -227,6 +233,56 @@ describe('PeriodicJobsService', () => {
 
     expect(harness.schedules).toHaveLength(1);
     expect(harness.schedules[0].pattern).toBe('0 9 * * 1-5');
+  });
+
+  it('runs one missed occurrence when an enabled job starts after its latest schedule', async () => {
+    const harness = createHarness({
+      jobs: [storedJob({
+        lastRun: {
+          startedAt: 50,
+          completedAt: 60,
+          status: 'succeeded',
+          summary: 'previous',
+          trigger: 'scheduled',
+        },
+      })],
+      findPreviousScheduledRun: () => 90,
+    });
+
+    harness.service.start();
+    await waitFor(() => harness.runner.execute.mock.calls.length === 1);
+
+    expect(harness.findPreviousScheduledRun).toHaveBeenCalledWith('0 9 * * 1-5', 100);
+    expect(harness.runner.execute).toHaveBeenCalledTimes(1);
+    expect(harness.settings.periodicJobs[0].lastRun).toMatchObject({
+      startedAt: 100,
+      status: 'succeeded',
+      trigger: 'scheduled',
+    });
+  });
+
+  it('does not catch up handled or disabled jobs', () => {
+    const harness = createHarness({
+      jobs: [
+        storedJob({
+          lastRun: {
+            startedAt: 95,
+            completedAt: 96,
+            status: 'succeeded',
+            summary: 'latest',
+            trigger: 'scheduled',
+          },
+        }),
+        storedJob({ id: 'disabled', enabled: false }),
+      ],
+      findPreviousScheduledRun: () => 90,
+    });
+
+    harness.service.start();
+
+    expect(harness.runner.execute).not.toHaveBeenCalled();
+    expect(harness.findPreviousScheduledRun).toHaveBeenCalledTimes(1);
+    expect(harness.schedules).toHaveLength(1);
   });
 
   it('recreates only the affected schedule after update and enable changes', async () => {

@@ -23,6 +23,7 @@ export interface PeriodicJobsDependencies {
     callback: () => Promise<void>,
     onError: (error: unknown) => void,
   ): { stop(): void };
+  findPreviousScheduledRun(pattern: string, before: number): number | null;
   initializeProvider(providerId: ProviderId): Promise<void>;
   createExecutionService(providerId: ProviderId): PeriodicJobExecutionService;
 }
@@ -201,12 +202,23 @@ export class PeriodicJobsService implements PeriodicJobsPort {
     });
     if (changed) this.notify();
   }
-
   start(): void {
     if (this.started || this.stopped) return;
     this.started = true;
+    const now = this.dependencies.clock.now();
     for (const job of this.getSettings().periodicJobs) {
       this.syncSchedule(job);
+      if (!job.enabled) continue;
+      const previousScheduledRun = this.dependencies.findPreviousScheduledRun(
+        job.schedule,
+        now,
+      );
+      if (
+        previousScheduledRun !== null
+        && previousScheduledRun > (job.lastRun?.startedAt ?? Number.NEGATIVE_INFINITY)
+      ) {
+        void this.beginRun(job.id, 'scheduled').catch(() => undefined);
+      }
     }
   }
 

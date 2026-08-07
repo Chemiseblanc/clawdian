@@ -471,6 +471,14 @@ export default class ClaudianPlugin extends Plugin {
           }, callback);
           return { stop: () => schedule.stop() };
         },
+        findPreviousScheduledRun: (pattern, before) => {
+          const schedule = new Cron(pattern, { paused: true });
+          try {
+            return schedule.previousRuns(1, new Date(before + 1))[0]?.getTime() ?? null;
+          } finally {
+            schedule.stop();
+          }
+        },
         initializeProvider: providerId => ProviderWorkspaceRegistry.ensureInitialized(
           this.providerHost,
           providerId,
