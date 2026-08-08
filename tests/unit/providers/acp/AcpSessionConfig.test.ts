@@ -335,4 +335,78 @@ describe('AcpSessionConfig', () => {
       currentLevel: 'low',
     });
   });
+
+  it('prefers the thought_level category over reasoning_effort and effort ids', () => {
+    expect(extractAcpSessionThoughtLevelState({
+      configOptions: [
+        {
+          currentValue: 'low',
+          id: 'effort',
+          name: 'Legacy effort',
+          options: [{ name: 'Low', value: 'low' }],
+          type: 'select',
+        },
+        {
+          currentValue: 'medium',
+          id: 'reasoning_effort',
+          name: 'Reasoning effort id',
+          options: [{ name: 'Medium', value: 'medium' }],
+          type: 'select',
+        },
+        {
+          category: 'thought_level',
+          currentValue: 'high',
+          id: 'copilot_reasoning',
+          name: 'Reasoning category',
+          options: [{ name: 'High', value: 'high' }],
+          type: 'select',
+        },
+      ],
+    })).toEqual({
+      availableLevels: [{ id: 'high', name: 'High' }],
+      configId: 'copilot_reasoning',
+      currentLevel: 'high',
+    });
+  });
+
+  it('prefers the reasoning_effort id over the legacy effort id', () => {
+    expect(extractAcpSessionThoughtLevelState({
+      configOptions: [
+        {
+          currentValue: 'low',
+          id: 'effort',
+          name: 'Legacy effort',
+          options: [{ name: 'Low', value: 'low' }],
+          type: 'select',
+        },
+        {
+          currentValue: 'medium',
+          id: 'reasoning_effort',
+          name: 'Reasoning effort id',
+          options: [{ name: 'Medium', value: 'medium' }],
+          type: 'select',
+        },
+      ],
+    })).toEqual({
+      availableLevels: [{ id: 'medium', name: 'Medium' }],
+      configId: 'reasoning_effort',
+      currentLevel: 'medium',
+    });
+  });
+
+  it('keeps legacy effort matching when newer reasoning metadata is unavailable', () => {
+    expect(extractAcpSessionThoughtLevelState({
+      configOptions: [{
+        currentValue: 'medium',
+        id: 'effort',
+        name: 'Effort',
+        options: [{ name: 'Medium', value: 'medium' }],
+        type: 'select',
+      }],
+    })).toEqual({
+      availableLevels: [{ id: 'medium', name: 'Medium' }],
+      configId: 'effort',
+      currentLevel: 'medium',
+    });
+  });
 });

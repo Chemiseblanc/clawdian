@@ -145,15 +145,20 @@ function findSessionConfigSelectOption(
   if (byCategory?.type === 'select') {
     return byCategory;
   }
-  const byLegacyId = configOptions.find((option) => (
-    option.type === 'select' && normalizeComparableKey(option.id) === legacyConfigIdForCategory(category)
-  ));
-  return byLegacyId?.type === 'select' ? byLegacyId : null;
+  const legacyIds = category === 'thought_level'
+    ? ['reasoning_effort', 'effort']
+    : [category];
+  for (const legacyId of legacyIds) {
+    const byLegacyId = configOptions.find((option) => (
+      option.type === 'select' && normalizeComparableKey(option.id) === legacyId
+    ));
+    if (byLegacyId?.type === 'select') {
+      return byLegacyId;
+    }
+  }
+  return null;
 }
 
-function legacyConfigIdForCategory(category: 'model' | 'mode' | 'thought_level'): string {
-  return category === 'thought_level' ? 'effort' : category;
-}
 
 function isSelectGroup(
   option: AcpSessionConfigSelectOption | AcpSessionConfigSelectGroup,

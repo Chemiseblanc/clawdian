@@ -16,6 +16,7 @@ import type {
   TitleGenerationResult,
   TitleGenerationService,
 } from '@/core/providers/types';
+import { updateCurrentCopilotCatalog } from '@/providers/copilot/settings';
 
 import {
   FakeAuxiliaryBackend,
@@ -63,6 +64,7 @@ describe('ProviderRegistry', () => {
     expect(ProviderRegistry.createSubagentHistoryService(host, 'grok')).toBeNull();
     expect(ProviderRegistry.createSubagentHistoryService(host, 'opencode')).toBeNull();
     expect(ProviderRegistry.createSubagentHistoryService(host, 'pi')).toBeNull();
+    expect(ProviderRegistry.createSubagentHistoryService(host, 'copilot')).toBeNull();
   });
 
   it('returns a settings reconciler for the default provider', () => {
@@ -92,6 +94,21 @@ describe('ProviderRegistry', () => {
     expect(caps.supportsRewind).toBe(false);
     expect(caps.reasoningControl).toBe('effort');
   });
+  it('returns Copilot capabilities', () => {
+    const caps = ProviderRegistry.getCapabilities('copilot');
+    expect(caps.providerId).toBe('copilot');
+    expect(caps.supportsNativeHistory).toBe(true);
+    expect(caps.supportsPlanMode).toBe(true);
+    expect(caps.supportsProviderCommands).toBe(true);
+    expect(caps.supportsImageAttachments).toBe(true);
+    expect(caps.supportsInstructionMode).toBe(true);
+    expect(caps.supportsMcpTools).toBe(true);
+    expect(caps.supportsFork).toBe(false);
+    expect(caps.supportsRewind).toBe(false);
+    expect(caps.supportsHostTools).toBe(false);
+    expect(caps.supportsTurnSteer).toBe(false);
+    expect(caps.reasoningControl).toBe('effort');
+  });
 
   it('returns OpenCode capabilities', () => {
     const caps = ProviderRegistry.getCapabilities('opencode');
@@ -117,6 +134,7 @@ describe('ProviderRegistry', () => {
       protocol: 'lifecycle',
     });
     expect(ProviderRegistry.getSubagentAdapter('pi')).toBeNull();
+    expect(ProviderRegistry.getSubagentAdapter('copilot')).toBeNull();
 
     expect(claudeAdapter?.isSpawnTool('Agent')).toBe(true);
     expect(claudeAdapter?.isSpawnTool('Task')).toBe(true);
@@ -139,15 +157,23 @@ describe('ProviderRegistry', () => {
     expect(caps.supportsFork).toBe(true);
   });
 
-  it('lists registered provider ids', () => {
-    const ids = ProviderRegistry.getRegisteredProviderIds();
-    expect(ids).toContain('claude');
-    expect(ids).toContain('codex');
-    expect(ids).toContain('grok');
-    expect(ids).toContain('pi');
+  it('lists registered provider ids in built-in module order exactly once', () => {
+    expect(ProviderRegistry.getRegisteredProviderIds()).toEqual([
+      'claude',
+      'codex',
+      'copilot',
+      'grok',
+      'opencode',
+      'pi',
+      'omp',
+    ]);
   });
 
   it('filters enabled provider ids using registration metadata', () => {
+    const copilotSettings: Record<string, unknown> = {};
+    expect(ProviderRegistry.isEnabled('copilot', copilotSettings)).toBe(false);
+    ProviderRegistry.setEnabled('copilot', copilotSettings, true);
+    expect(ProviderRegistry.isEnabled('copilot', copilotSettings)).toBe(true);
     expect(ProviderRegistry.getEnabledProviderIds({
       providerConfigs: {
         codex: { enabled: false },
@@ -158,6 +184,12 @@ describe('ProviderRegistry', () => {
         codex: { enabled: true },
       },
     })).toEqual(['codex', 'claude']);
+    expect(ProviderRegistry.getEnabledProviderIds({
+      providerConfigs: {
+        copilot: { enabled: true },
+        codex: { enabled: true },
+      },
+    })).toEqual(['copilot', 'codex', 'claude']);
     expect(ProviderRegistry.getEnabledProviderIds({
       providerConfigs: {
         claude: { enabled: false },
@@ -184,11 +216,12 @@ describe('ProviderRegistry', () => {
     expect(ProviderRegistry.getBlankTabProviderIds({
       providerConfigs: {
         codex: { enabled: true },
+        copilot: { enabled: true },
         grok: { enabled: true },
         opencode: { enabled: true },
         pi: { enabled: true },
       },
-    })).toEqual(['claude', 'codex', 'grok', 'pi', 'opencode']);
+    })).toEqual(['claude', 'codex', 'copilot', 'grok', 'pi', 'opencode']);
   });
 
   it('exposes title generation models only from enabled providers', () => {
@@ -248,11 +281,55 @@ describe('ProviderRegistry', () => {
     expect(options.find(option => option.value === 'sonnet')?.label)
       .toBe('Claude: Sonnet');
   });
+  it('exposes Copilot title models only when enabled and discovered', () => {
+    const undiscoveredSettings = {
+      providerConfigs: {
+        copilot: {
+          enabled: true,
+        },
+      },
+    };
+    expect(ProviderRegistry.getTitleGenerationModelOptions(undiscoveredSettings))
+      .not.toEqual(expect.arrayContaining([
+        expect.objectContaining({ value: 'copilot/gpt-5' }),
+      ]));
+
+    const enabledSettings = {
+      providerConfigs: {
+        copilot: {
+          enabled: true,
+          modelAliases: { 'gpt-5': 'Fast GPT' },
+          visibleModels: ['gpt-5'],
+        },
+      },
+    };
+    updateCurrentCopilotCatalog(enabledSettings, {
+      defaultModelId: 'gpt-5',
+      fingerprint: 'copilot-title-catalog',
+      models: [{
+        displayName: 'GPT-5',
+        rawId: 'gpt-5',
+        reasoningEfforts: [],
+        supportsReasoning: false,
+      }],
+      refreshedAt: 1,
+    });
+
+    expect(ProviderRegistry.getTitleGenerationModelOptions(enabledSettings)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          label: 'GitHub Copilot: Fast GPT',
+          value: 'copilot/gpt-5',
+        }),
+      ]),
+    );
+  });
 
   it('returns the display name from provider registration metadata', () => {
     expect(ProviderRegistry.getProviderDisplayName('claude')).toBe('Claude');
     expect(ProviderRegistry.getProviderDisplayName('codex')).toBe('Codex');
     expect(ProviderRegistry.getProviderDisplayName('grok')).toBe('Grok');
+    expect(ProviderRegistry.getProviderDisplayName('copilot')).toBe('GitHub Copilot');
   });
 
   it('routes auto title generation to Claude independently of chat provider state', async () => {

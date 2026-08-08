@@ -3,11 +3,15 @@ import '@/providers';
 import { ProviderExecutionLifecycleRegistry } from '@/core/execution';
 import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
 import { ProviderWorkspaceRegistry } from '@/core/providers/ProviderWorkspaceRegistry';
+import type { ProviderWorkspaceServices } from '@/core/providers/types';
 import { ClaudeExecutionBackend } from '@/providers/claude/execution/ClaudeExecutionBackend';
 import { ClaudeSubagentHistoryService } from '@/providers/claude/history/ClaudeSubagentHistoryService';
 import { claudeProviderRegistration } from '@/providers/claude/registration';
 import { CodexExecutionBackend } from '@/providers/codex/execution/CodexExecutionBackend';
 import { codexProviderRegistration } from '@/providers/codex/registration';
+import { CopilotCommandCatalog } from '@/providers/copilot/commands/CopilotCommandCatalog';
+import { CopilotExecutionBackend } from '@/providers/copilot/execution/CopilotExecutionBackend';
+import { copilotProviderRegistration } from '@/providers/copilot/registration';
 import { GrokCommandCatalog } from '@/providers/grok/commands/GrokCommandCatalog';
 import { GrokExecutionBackend } from '@/providers/grok/execution/GrokExecutionBackend';
 import { grokProviderRegistration } from '@/providers/grok/registration';
@@ -34,6 +38,7 @@ function createHost(): any {
     ) => executionLifecycleRegistry.runTransition(providerIds as any, mutation),
     settings: {
       providerConfigs: {
+        copilot: { enabled: true },
         codex: { enabled: true },
         grok: { enabled: true },
         opencode: { enabled: true },
@@ -47,6 +52,7 @@ describe('provider execution registration', () => {
   afterEach(() => {
     ProviderWorkspaceRegistry.setServices('claude', undefined);
     ProviderWorkspaceRegistry.setServices('codex', undefined);
+    ProviderWorkspaceRegistry.setServices('copilot', undefined);
     ProviderWorkspaceRegistry.setServices('grok', undefined);
     ProviderWorkspaceRegistry.setServices('opencode', undefined);
     ProviderWorkspaceRegistry.setServices('pi', undefined);
@@ -56,6 +62,7 @@ describe('provider execution registration', () => {
     for (const registration of [
       claudeProviderRegistration,
       codexProviderRegistration,
+      copilotProviderRegistration,
       grokProviderRegistration,
       opencodeProviderRegistration,
       piProviderRegistration,
@@ -78,6 +85,10 @@ describe('provider execution registration', () => {
       pluginManager: {},
     } as any);
     ProviderWorkspaceRegistry.setServices('codex', {} as any);
+    ProviderWorkspaceRegistry.setServices('copilot', {
+      commandCatalog: new CopilotCommandCatalog(),
+      modelCatalogCoordinator: {},
+    } as unknown as ProviderWorkspaceServices);
     ProviderWorkspaceRegistry.setServices('grok', {
       commandCatalog: new GrokCommandCatalog(),
       modelCatalogCoordinator: {},
@@ -93,6 +104,8 @@ describe('provider execution registration', () => {
       .toBeInstanceOf(ClaudeExecutionBackend);
     expect(ProviderRegistry.createExecutionBackend(host, 'codex'))
       .toBeInstanceOf(CodexExecutionBackend);
+    expect(ProviderRegistry.createExecutionBackend(host, 'copilot'))
+      .toBeInstanceOf(CopilotExecutionBackend);
     expect(ProviderRegistry.createExecutionBackend(host, 'grok'))
       .toBeInstanceOf(GrokExecutionBackend);
     expect(ProviderRegistry.createExecutionBackend(host, 'opencode'))
@@ -108,6 +121,7 @@ describe('provider execution registration', () => {
       .toBeInstanceOf(ClaudeSubagentHistoryService);
     expect(ProviderRegistry.createSubagentHistoryService(host, 'codex')).toBeNull();
     expect(ProviderRegistry.createSubagentHistoryService(host, 'grok')).toBeNull();
+    expect(ProviderRegistry.createSubagentHistoryService(host, 'copilot')).toBeNull();
     expect(ProviderRegistry.createSubagentHistoryService(host, 'opencode')).toBeNull();
     expect(ProviderRegistry.createSubagentHistoryService(host, 'pi')).toBeNull();
   });
