@@ -105,7 +105,7 @@ describe('ProviderRegistry', () => {
     expect(caps.supportsMcpTools).toBe(true);
     expect(caps.supportsFork).toBe(false);
     expect(caps.supportsRewind).toBe(false);
-    expect(caps.supportsHostTools).toBe(false);
+    expect(caps.supportsHostTools).toBe(true);
     expect(caps.supportsTurnSteer).toBe(false);
     expect(caps.reasoningControl).toBe('effort');
   });

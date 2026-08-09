@@ -1,3 +1,5 @@
+import { setImmediate as nextTurn } from 'node:timers/promises';
+
 import type {
   ProviderExecutionEvent,
   ProviderExecutionRequest,
@@ -5,6 +7,7 @@ import type {
   ProviderSessionConfig,
 } from '@/core/execution';
 import type { ProviderHost } from '@/core/providers/ProviderHost';
+import type { HostToolCatalog } from '@/core/tools/HostToolCatalog';
 import type {
   AcpPromptResponse,
   AcpSessionNotification,
@@ -15,6 +18,7 @@ import {
   type CopilotExecutionNativeConnection,
   type CopilotExecutionNativeFactory,
 } from '@/providers/copilot/execution/CopilotExecutionBackend';
+import type { CopilotExecutionNativeCreateOptions } from '@/providers/copilot/execution/CopilotExecutionNativeConnection';
 
 interface Deferred<T> {
   promise: Promise<T>;
@@ -199,7 +203,9 @@ async function collect(events: AsyncIterable<ProviderExecutionEvent>): Promise<P
 }
 
 async function waitFor(condition: () => boolean): Promise<void> {
-  for (let attempt = 0; attempt < 50 && !condition(); attempt += 1) await Promise.resolve();
+  for (let attempt = 0; attempt < 100 && !condition(); attempt += 1) {
+    await nextTurn();
+  }
   expect(condition()).toBe(true);
 }
 
@@ -308,5 +314,131 @@ describe('CopilotExecutionSession', () => {
     expect(events).toEqual(expect.arrayContaining([
       expect.objectContaining({ reason: 'cancelled', type: 'cancelled' }),
     ]));
+  });
+
+  it('advertises host tools, canonicalizes live calls, and suppresses replayed calls', async () => {
+    const catalog: HostToolCatalog = {
+      list: jest.fn(() => [{
+        name: 'claudian.periodic_job.list',
+        description: 'List jobs.',
+        effect: 'read',
+        inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+      }]),
+      invoke: jest.fn(),
+    };
+    const plugin = { ...createPlugin(), hostTools: catalog } as ProviderHost;
+    const native = new FakeNative();
+    native.loadReplay = [{
+      kind: 'read',
+      rawInput: {},
+      rawOutput: { jobs: [] },
+      status: 'completed',
+      title: 'claudian/periodic_job_list',
+      toolCallId: 'historic-tool',
+      sessionUpdate: 'tool_call',
+    }];
+    const factory = {
+      create: jest.fn(() => native),
+    } as unknown as CopilotExecutionNativeFactory;
+    const session = new CopilotExecutionBackend(plugin, {
+      nativeFactory: factory,
+    }).createSession(createConfig({
+      hostToolAccess: 'enabled',
+      resumeSeed: { providerSessionId: 'saved-session' },
+    }));
+    const run = session.execute(createRequest({ toolPolicy: { kind: 'read-only' } }));
+    await waitFor(() => native.promptCalls.length === 1);
+
+    native.emit({
+      kind: 'read',
+      rawInput: {},
+      rawOutput: { jobs: [] },
+      status: 'completed',
+      title: 'claudian/periodic_job_list',
+      toolCallId: 'live-tool',
+      sessionUpdate: 'tool_call',
+    });
+    native.completePrompt();
+    const events = await collect(run.events);
+
+    expect(native.loadSessionCalls).toEqual([expect.objectContaining({
+      mcpServers: [expect.objectContaining({
+        name: 'claudian',
+        type: 'http',
+      })],
+    })]);
+    expect(events.filter(event => (
+      event.type === 'tool_started' && event.toolCallId === 'live-tool'
+    ))).toEqual([expect.objectContaining({
+      name: 'claudian.periodic_job.list',
+    })]);
+    expect(events.filter(event => (
+      event.type === 'tool_completed' && event.toolCallId === 'live-tool'
+    ))).toHaveLength(1);
+    expect(events).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ toolCallId: 'historic-tool' }),
+    ]));
+    expect(catalog.invoke).not.toHaveBeenCalled();
+    await session.dispose();
+  });
+
+  it('passes write host-tool calls through Copilot native authorization', async () => {
+    const requestApproval = jest.fn(async ({ interactionId }) => ({
+      decision: 'allow' as const,
+      interactionId,
+    }));
+    const interactionPort: ProviderInteractionPort = {
+      requestApproval,
+      askUserQuestion: jest.fn(),
+      requestPlanDecision: jest.fn(),
+      dismissInteraction: jest.fn(),
+    };
+    const catalog: HostToolCatalog = {
+      list: () => [{
+        name: 'claudian.periodic_job.create',
+        description: 'Create a job.',
+        effect: 'write',
+        inputSchema: { type: 'object' },
+      }],
+      invoke: jest.fn(),
+    };
+    const native = new FakeNative();
+    let createOptions: CopilotExecutionNativeCreateOptions | null = null;
+    const factory: CopilotExecutionNativeFactory = {
+      create: (options) => {
+        createOptions = options;
+        return native;
+      },
+    };
+    const session = new CopilotExecutionBackend({
+      ...createPlugin(),
+      hostTools: catalog,
+    } as ProviderHost, { nativeFactory: factory }).createSession(createConfig({
+      hostToolAccess: 'enabled',
+      interactionPort,
+    }));
+    const run = session.execute(createRequest());
+    await waitFor(() => native.promptCalls.length === 1);
+
+    const response = await createOptions!.requestPermission({
+      options: [{ kind: 'allow_once', name: 'Allow once', optionId: 'allow-once' }],
+      sessionId: 'new-session',
+      toolCall: {
+        kind: 'other',
+        rawInput: { name: 'Daily review' },
+        title: 'claudian/periodic_job_create',
+        toolCallId: 'create-tool',
+      },
+    });
+
+    expect(response).toEqual({
+      outcome: { optionId: 'allow-once', outcome: 'selected' },
+    });
+    expect(requestApproval).toHaveBeenCalledWith(expect.objectContaining({
+      toolName: 'claudian/periodic_job_create',
+    }), expect.any(AbortSignal));
+    native.completePrompt();
+    await collect(run.events);
+    await session.dispose();
   });
 });

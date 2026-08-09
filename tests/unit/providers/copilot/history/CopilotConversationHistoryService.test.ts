@@ -110,7 +110,22 @@ function pathContext(): {
 describe('CopilotConversationHistoryService', () => {
   it('loads ACP replay notifications into canonical conversation messages and cleans up', async () => {
     const connection = makeConnection();
-    connection.setLoadReplay([userMessageChunk('Hello'), agentMessageChunk('Hi there')]);
+    connection.setLoadReplay([
+      userMessageChunk('Hello'),
+      agentMessageChunk('Hi there'),
+      {
+        sessionId: 'copilot-session',
+        update: {
+          kind: 'read',
+          rawInput: {},
+          rawOutput: { jobs: [] },
+          status: 'completed',
+          title: 'claudian/periodic_job_list',
+          toolCallId: 'tool-1',
+          sessionUpdate: 'tool_call',
+        },
+      },
+    ]);
     const factory = makeFactory(connection);
     const service = new CopilotConversationHistoryService({
       connectionFactory: factory,
@@ -129,7 +144,17 @@ describe('CopilotConversationHistoryService', () => {
     })]);
     expect(conversation.messages).toEqual([
       expect.objectContaining({ content: 'Hello', role: 'user' }),
-      expect.objectContaining({ content: 'Hi there', role: 'assistant' }),
+      expect.objectContaining({
+        content: 'Hi there',
+        role: 'assistant',
+        toolCalls: [expect.objectContaining({
+          id: 'tool-1',
+          name: 'claudian.periodic_job.list',
+          providerPayload: expect.objectContaining({
+            rawName: 'claudian/periodic_job_list',
+          }),
+        })],
+      }),
     ]);
     expect(connection.shutdown).toHaveBeenCalledTimes(1);
   });

@@ -17,8 +17,11 @@ import {
   AcpExecutionEventNormalizer,
   AcpInteractionController,
   type AcpLoadSessionResponse,
+  type AcpMcpServer,
   type AcpNewSessionResponse,
   type AcpPromptResponse,
+  type AcpRequestPermissionRequest,
+  type AcpRequestPermissionResponse,
   type AcpSessionConfigOption,
   type AcpSessionModelState,
   type AcpSessionModeState,
@@ -35,6 +38,11 @@ import {
   resolveCopilotReasoningEffort,
 } from '../models';
 import { buildCopilotPromptBlocks } from '../runtime/buildCopilotPrompt';
+import {
+  buildCopilotHostToolRegistration,
+  canonicalizeCopilotHostToolName,
+} from '../runtime/CopilotHostToolAdapter';
+import { CopilotHostToolServer } from '../runtime/CopilotHostToolServer';
 import { buildCopilotRuntimeEnv } from '../runtime/CopilotRuntimeEnvironment';
 import type { CopilotModelCatalogCoordinator } from './CopilotExecutionBackend';
 import type {
@@ -145,6 +153,8 @@ interface NativeOwner {
   initialized: boolean;
   loadedSessionId: string | null;
   loadedConfigurationKey: string | null;
+  hostToolCanonicalNames: ReadonlySet<string>;
+  hostToolServer: CopilotHostToolServer | null;
   modes: AcpSessionModeState | null;
   models: AcpSessionModelState | null;
   configOptions: AcpSessionConfigOption[];
@@ -359,16 +369,7 @@ export class CopilotExecutionSession implements ProviderExecutionSession {
       command,
       cwd: this.config.vaultWorkingDirectory,
       env: buildCopilotRuntimeEnv(this.plugin.settings, command),
-      requestPermission: (permission, signal) => {
-        const policy = this.activeRequest?.toolPolicy.kind;
-        if (policy === 'passive' || policy === 'read-only') {
-          return Promise.resolve({ outcome: { outcome: 'cancelled' } });
-        }
-        return this.interactionController.requestPermission(
-          permission,
-          signal ?? undefined,
-        );
-      },
+      requestPermission: (permission, signal) => this.requestPermission(permission, signal),
       version: this.plugin.manifest?.version,
     });
     const owner: NativeOwner = {
@@ -376,6 +377,8 @@ export class CopilotExecutionSession implements ProviderExecutionSession {
       generation,
       initialized: false,
       loadedConfigurationKey: null,
+      hostToolCanonicalNames: new Set(),
+      hostToolServer: null,
       loadedSessionId: null,
       modes: null,
       models: null,
@@ -416,6 +419,8 @@ export class CopilotExecutionSession implements ProviderExecutionSession {
       }
       return owner.loadedSessionId;
     }
+    const mcpServers = await this.prepareHostTools(owner, request);
+    if (!this.isCurrent(run, generation)) throw new CopilotExecutionCancellationError();
 
     if (this.providerSessionId) {
       const attemptedSessionId = this.providerSessionId;
@@ -423,7 +428,7 @@ export class CopilotExecutionSession implements ProviderExecutionSession {
       try {
         const response = await native.loadSession({
           cwd: this.config.vaultWorkingDirectory,
-          mcpServers: [],
+          mcpServers,
           sessionId: attemptedSessionId,
         });
         if (!this.isCurrent(run, generation)) throw new CopilotExecutionCancellationError();
@@ -442,7 +447,7 @@ export class CopilotExecutionSession implements ProviderExecutionSession {
 
     const response = await native.newSession({
       cwd: this.config.vaultWorkingDirectory,
-      mcpServers: [],
+      mcpServers,
     });
     if (!this.isCurrent(run, generation)) throw new CopilotExecutionCancellationError();
     this.captureSession(response.sessionId);
@@ -495,6 +500,53 @@ export class CopilotExecutionSession implements ProviderExecutionSession {
     }
   }
 
+  private async prepareHostTools(
+    owner: NativeOwner,
+    request: ProviderExecutionRequest,
+  ): Promise<AcpMcpServer[]> {
+    const registration = buildCopilotHostToolRegistration(
+      this.plugin.hostTools,
+      request.toolPolicy,
+      this.config.hostToolAccess,
+    );
+    owner.hostToolCanonicalNames = new Set(
+      Object.values(registration.canonicalNameByToolName),
+    );
+    if (registration.definitions.length === 0) return [];
+
+    const model = request.configuration.model;
+    if (!model) throw new Error('Copilot host tools require a selected model.');
+    const server = new CopilotHostToolServer({
+      catalog: this.plugin.hostTools,
+      model,
+      registration,
+    });
+    owner.hostToolServer = server;
+    return [await server.start()];
+  }
+
+  private requestPermission(
+    permission: AcpRequestPermissionRequest,
+    signal?: AbortSignal,
+  ): Promise<AcpRequestPermissionResponse> {
+    const policy = this.activeRequest?.toolPolicy.kind;
+    if (policy === 'passive') {
+      return Promise.resolve({ outcome: { outcome: 'cancelled' } });
+    }
+    if (policy === 'read-only') {
+      const canonicalName = canonicalizeCopilotHostToolName(
+        permission.toolCall.title?.trim() || '',
+      );
+      if (!this.nativeOwner?.hostToolCanonicalNames.has(canonicalName)) {
+        return Promise.resolve({ outcome: { outcome: 'cancelled' } });
+      }
+    }
+    return this.interactionController.requestPermission(
+      permission,
+      signal,
+    );
+  }
+
   private handleNotification(notification: AcpSessionNotification): void {
     const owner = this.nativeOwner;
     if (
@@ -528,7 +580,10 @@ export class CopilotExecutionSession implements ProviderExecutionSession {
     if (!run.acceptingLiveOutput || result.events.length === 0) return;
     this.accept(run);
     for (const event of result.events) {
-      run.emit({ ...event, scope: run.scope() });
+      const normalizedEvent = event.type === 'tool_started'
+        ? { ...event, name: canonicalizeCopilotHostToolName(event.name) }
+        : event;
+      run.emit({ ...normalizedEvent, scope: run.scope() });
     }
   }
 
@@ -624,7 +679,9 @@ export class CopilotExecutionSession implements ProviderExecutionSession {
       try { owner.notificationUnsubscribe(); } catch { /* best effort */ }
     }
     if (!owner.shutdownFlight) {
-      owner.shutdownFlight = Promise.resolve().then(() => owner.native.shutdown());
+      owner.shutdownFlight = Promise.resolve()
+        .then(() => owner.native.shutdown())
+        .finally(() => owner.hostToolServer?.close());
     }
     await owner.shutdownFlight;
   }

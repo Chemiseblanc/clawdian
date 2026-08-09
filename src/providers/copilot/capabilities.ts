@@ -9,7 +9,7 @@ export const COPILOT_PROVIDER_CAPABILITIES: Readonly<ProviderCapabilities> = Obj
   supportsProviderCommands: true,
   supportsImageAttachments: true,
   supportsInstructionMode: true,
-  supportsHostTools: false,
+  supportsHostTools: true,
   supportsMcpTools: true,
   supportsTurnSteer: false,
   reasoningControl: 'effort',

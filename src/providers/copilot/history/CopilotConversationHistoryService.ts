@@ -21,6 +21,7 @@ import {
   type AcpToolCall,
   type AcpToolCallUpdate,
 } from '../../acp';
+import { canonicalizeCopilotHostToolName } from '../runtime/CopilotHostToolAdapter';
 
 const COPILOT_COMMAND = 'copilot';
 const COPILOT_ARGS = ['--acp', '--no-auto-update'];
@@ -409,7 +410,12 @@ function normalizeToolCall(
   const rawOutput = update.rawOutput !== undefined ? update.rawOutput : existing?.providerPayload?.rawOutput;
   const input = normalizeToolInput(rawInput ?? existing?.input);
   const title = 'title' in update ? update.title : undefined;
-  const name = title?.trim() || ('kind' in update ? update.kind?.trim() : undefined) || existing?.name || 'tool';
+  const rawName = title?.trim()
+    || ('kind' in update ? update.kind?.trim() : undefined)
+    || existing?.providerPayload?.rawName
+    || existing?.name
+    || 'tool';
+  const name = canonicalizeCopilotHostToolName(rawName);
   const status = normalizeToolStatus(update.status, existing?.status);
   const renderedOutput = renderToolOutput(update.content) || renderRawOutput(rawOutput) || existing?.result;
   return {
@@ -421,7 +427,7 @@ function normalizeToolCall(
     providerPayload: {
       ...(rawInput !== undefined ? { rawInput } : {}),
       ...(rawOutput !== undefined ? { rawOutput } : {}),
-      rawName: name,
+      rawName,
     },
   };
 }
