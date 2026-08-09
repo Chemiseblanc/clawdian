@@ -76,7 +76,8 @@
       "general": "General",
       "claude": "Claude",
       "codex": "Codex",
-      "jobs": "Jobs"
+      "jobs": "Jobs",
+      "providers": "Providers"
     },
     "jobs": {
       "title": "Periodic jobs",

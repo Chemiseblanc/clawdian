@@ -119,7 +119,9 @@ function flattenTranslations(
 
 function isEnglishFallbackKey(key: string): boolean {
   const normalized = key.startsWith('default.') ? key.slice('default.'.length) : key;
-  return normalized === 'settings.tabs.jobs' || normalized.startsWith('settings.jobs.');
+  return normalized === 'settings.tabs.jobs'
+    || normalized === 'settings.tabs.providers'
+    || normalized.startsWith('settings.jobs.');
 }
 
 describe('locale files', () => {

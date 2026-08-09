@@ -100,6 +100,7 @@ jest.mock('obsidian', () => {
 });
 
 import { DEFAULT_CLAUDIAN_SETTINGS } from '@/app/settings/defaultSettings';
+import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
 import { ProviderWorkspaceRegistry } from '@/core/providers/ProviderWorkspaceRegistry';
 import { ClaudianSettingTab } from '@/features/settings/ClaudianSettings';
 import { PeriodicJobSettings } from '@/features/settings/ui/PeriodicJobSettings';
@@ -217,29 +218,47 @@ describe('ClaudianSettingTab display settings', () => {
     expect(plugin.settings.enableDualPane).toBe(false);
     expect(display).toHaveBeenCalledTimes(1);
   });
-  it('orders General, Jobs, and provider tabs without initializing Jobs as a provider', () => {
+  it('groups provider settings under one tab and switches them with a combobox', () => {
     const { tab } = createTab(true);
     const container = document.createElement('div');
     tab.containerEl = container;
     const initialize = jest.spyOn(ProviderWorkspaceRegistry, 'ensureInitialized')
-      .mockResolvedValue(undefined);
+      .mockImplementation(() => new Promise<void>(() => undefined));
 
     tab.display();
-    const labels = Array.from(
+    const buttons = Array.from(
       container.querySelectorAll<HTMLButtonElement>('.claudian-settings-tab'),
-      button => button.textContent,
     );
-    const jobsButton = Array.from(
-      container.querySelectorAll<HTMLButtonElement>('.claudian-settings-tab'),
-    ).find(button => button.textContent === t('settings.tabs.jobs'))!;
-    jobsButton.click();
+    const labels = buttons.map(button => button.textContent);
+    const jobsButton = buttons.find(
+      button => button.textContent === t('settings.tabs.jobs'),
+    )!;
+    const providersButton = buttons.find(
+      button => button.textContent === t('settings.tabs.providers'),
+    )!;
+    const providerSelect = container.querySelector<HTMLSelectElement>(
+      '.claudian-settings-provider-selector select',
+    )!;
 
-    expect(labels.slice(0, 3)).toEqual([
+    jobsButton.click();
+    expect(initialize).not.toHaveBeenCalled();
+    expect(labels).toEqual([
       t('settings.tabs.general'),
       t('settings.tabs.jobs'),
-      'Claude',
+      t('settings.tabs.providers'),
     ]);
-    expect(initialize).not.toHaveBeenCalled();
+    expect(Array.from(providerSelect.options, option => option.text)).toEqual(
+      ProviderRegistry.getRegisteredProviderIds().map(providerId => (
+        ProviderRegistry.getProviderDisplayName(providerId)
+      )),
+    );
+
+    providersButton.click();
+    expect(initialize).toHaveBeenCalledWith(expect.anything(), 'claude', 'settings-tab');
+
+    providerSelect.value = 'codex';
+    providerSelect.dispatchEvent(new Event('change'));
+    expect(initialize).toHaveBeenCalledWith(expect.anything(), 'codex', 'settings-tab');
   });
 
   it('disposes the previous Jobs renderer before a second display', () => {
