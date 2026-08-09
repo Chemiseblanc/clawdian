@@ -13,6 +13,7 @@ import type {
 } from '@/core/execution';
 import type { McpServerManager } from '@/core/mcp/McpServerManager';
 import type { ProviderHost } from '@/core/providers/ProviderHost';
+import type { HostToolCatalog } from '@/core/tools/HostToolCatalog';
 import type { Conversation } from '@/core/types';
 import type { ClaudeWorkspaceServices } from '@/providers/claude/app/ClaudeWorkspaceServices';
 import { ClaudeExecutionBackend } from '@/providers/claude/execution/ClaudeExecutionBackend';
@@ -80,6 +81,10 @@ function createHost(): ProviderHost {
       loadUserClaudeSettings: false,
     },
     storage: {} as ProviderHost['storage'],
+    hostTools: {
+      list: () => [],
+      invoke: jest.fn(),
+    },
     getResolvedProviderCliPath: jest.fn().mockResolvedValue('/bin/claude'),
     getActiveEnvironmentVariables: jest.fn().mockReturnValue(''),
   } as unknown as ProviderHost;
@@ -1778,6 +1783,67 @@ describe('ClaudeExecutionBackend', () => {
     }));
     expect(session.getSnapshot().status).toBe('invalidated');
     await session.dispose();
+  });
+  it('advertises policy-filtered host tools only for enabled chat sessions', async () => {
+    sdkMock.setMockMessages([
+      { type: 'system', subtype: 'init', session_id: 'host-tool-session' },
+      { type: 'result', subtype: 'success' },
+    ], { appendResult: false });
+    const catalog: HostToolCatalog = {
+      list: () => [
+        {
+          name: 'claudian.periodic_job.list',
+          description: 'List jobs.',
+          inputSchema: { type: 'object', properties: {} },
+          effect: 'read',
+        },
+        {
+          name: 'claudian.periodic_job.create',
+          description: 'Create a job.',
+          inputSchema: { type: 'object', properties: {} },
+          effect: 'write',
+        },
+      ],
+      invoke: jest.fn(),
+    };
+    const host = Object.assign(createHost(), { hostTools: catalog });
+    const { services } = createServices();
+    const backend = new ClaudeExecutionBackend(host, services);
+    const enabledSession = backend.createSession(createConfig({
+      hostToolAccess: 'enabled',
+    }));
+
+    try {
+      await collectEvents(enabledSession.execute(createRequest({
+        toolPolicy: { kind: 'read-only' },
+      })).events);
+
+      expect(sdkMock.getLastOptions()?.mcpServers).toEqual(expect.objectContaining({
+        claudian: expect.objectContaining({
+          type: 'http',
+          url: expect.stringMatching(/^http:\/\/127\.0\.0\.1:/),
+        }),
+      }));
+      expect(sdkMock.getLastOptions()?.tools).toContain(
+        'mcp__claudian__periodic_job_list',
+      );
+      expect(sdkMock.getLastOptions()?.tools).not.toContain(
+        'mcp__claudian__periodic_job_create',
+      );
+    } finally {
+      await enabledSession.dispose();
+    }
+
+    sdkMock.setMockMessages([
+      { type: 'system', subtype: 'init', session_id: 'auxiliary-session' },
+      { type: 'result', subtype: 'success' },
+    ], { appendResult: false });
+    const disabledSession = backend.createSession(createConfig({
+      hostToolAccess: 'disabled',
+    }));
+    await collectEvents(disabledSession.execute(createRequest()).events);
+    expect(sdkMock.getLastOptions()?.mcpServers).toBeUndefined();
+    await disabledSession.dispose();
   });
 });
 

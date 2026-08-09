@@ -112,6 +112,7 @@ ClaudeExecutionStrategySink {
   private readonly pendingProviderStateDeletes = new Set<string>();
   private lastEncodedRequest: ClaudeEncodedExecutionRequest | null = null;
   private lastAllowedTools: ReadonlySet<string> | null = null;
+  private activeHostToolServer: ClaudeEncodedExecutionRequest['hostToolServer'] = null;
   private currentPermissionMode: PermissionMode;
   private readonly eventNormalizer = new ClaudeExecutionEventNormalizer();
 
@@ -301,6 +302,8 @@ ClaudeExecutionStrategySink {
     this.disposed = true;
     this.interactionHandler.dismissAll('session-disposed');
     await this.strategy.dispose();
+    await this.activeHostToolServer?.close();
+    this.activeHostToolServer = null;
     this.setStatus('disposed');
     this.emitSession({
       type: 'session_state_changed',
@@ -671,6 +674,7 @@ ClaudeExecutionStrategySink {
     active: ActiveRequestedRun,
     request: ProviderExecutionRequest,
   ): Promise<void> {
+    let pendingHostToolServer: ClaudeEncodedExecutionRequest['hostToolServer'] = null;
     try {
       this.currentPermissionMode = normalizePermissionMode(
         request.configuration.mode
@@ -694,11 +698,20 @@ ClaudeExecutionStrategySink {
         nativeResume,
         replayConversationHistory,
       );
-      if (this.activeRun !== active || active.terminal) return;
+      pendingHostToolServer = encoded.hostToolServer;
+      if (this.activeRun !== active || active.terminal) {
+        await pendingHostToolServer?.close();
+        return;
+      }
       this.lastEncodedRequest = encoded;
       this.lastAllowedTools = encoded.allowedTools;
       await this.strategy.startTurn(encoded, active.queryToken);
+      const previousHostToolServer = this.activeHostToolServer;
+      this.activeHostToolServer = pendingHostToolServer;
+      pendingHostToolServer = null;
+      await previousHostToolServer?.close();
     } catch (error) {
+      await pendingHostToolServer?.close();
       if (this.activeRun === active && !active.terminal) {
         if (active.abortController.signal.aborted) {
           this.cancel();
@@ -1120,7 +1133,11 @@ ClaudeExecutionStrategySink {
     );
     this.lastEncodedRequest = encoded;
     this.lastAllowedTools = encoded.allowedTools;
-    return await this.strategy.ensureReadyForRewind(encoded, queryToken);
+    const query = await this.strategy.ensureReadyForRewind(encoded, queryToken);
+    const previousHostToolServer = this.activeHostToolServer;
+    this.activeHostToolServer = encoded.hostToolServer;
+    await previousHostToolServer?.close();
+    return query;
   }
 }
 

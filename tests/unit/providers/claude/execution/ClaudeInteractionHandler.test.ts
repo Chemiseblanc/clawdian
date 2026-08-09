@@ -121,6 +121,24 @@ describe('createClaudeExecutionCanUseTool', () => {
     });
   });
 
+  it.each([
+    'mcp__claudian__periodic_job_create',
+    'mcp__claudian__periodic_job_update',
+    'mcp__claudian__periodic_job_delete',
+  ])('routes host mutation %s through native authorization', async (toolName) => {
+    const port = createPort();
+    const handler = createHandler(port);
+
+    await handler(toolName, { id: 'job-1' }, nativeOptions);
+
+    expect(port.requestApproval).toHaveBeenCalledWith(
+      expect.objectContaining({
+        toolName,
+        input: { id: 'job-1' },
+      }),
+      nativeOptions.signal,
+    );
+  });
   it('fails closed for disallowed tools before opening an interaction', async () => {
     const port = createPort();
     const handler = createClaudeExecutionCanUseTool({

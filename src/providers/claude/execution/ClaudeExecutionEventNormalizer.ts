@@ -16,6 +16,7 @@ import type {
 } from '../../../core/execution';
 import type { StreamChunk } from '../../../core/types';
 import { ClaudeTaskToolNormalizer } from '../normalization/ClaudeTaskToolNormalizer';
+import { canonicalizeClaudeHostToolName } from '../runtime/ClaudeHostToolAdapter';
 import {
   isAsyncSubagentCompletion,
   isContextWindowEvent,
@@ -259,10 +260,18 @@ function normalizeTaskToolChunk(
   normalizer: ClaudeTaskToolNormalizer,
 ): StreamChunk[] {
   if (chunk.type === 'tool_use') {
-    const normalized = normalizer.normalizeToolUse(chunk.id, chunk.name, chunk.input);
-    if (!normalized) return [chunk];
-    return [{
+    const canonicalChunk = {
       ...chunk,
+      name: canonicalizeClaudeHostToolName(chunk.name),
+    };
+    const normalized = normalizer.normalizeToolUse(
+      canonicalChunk.id,
+      canonicalChunk.name,
+      canonicalChunk.input,
+    );
+    if (!normalized) return [canonicalChunk];
+    return [{
+      ...canonicalChunk,
       name: normalized.name,
       input: normalized.input,
       providerPayload: normalized.providerPayload,

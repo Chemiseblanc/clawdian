@@ -13,6 +13,7 @@ import {
   parseImageDataUri,
 } from '../../../utils/imageAttachment';
 import { isCompactionCanceledStderr, isInterruptSignalText } from '../../../utils/interrupt';
+import { canonicalizeClaudeHostToolName } from '../runtime/ClaudeHostToolAdapter';
 import { extractToolResultContent } from '../sdk/toolResultContent';
 import type {
   AsyncSubagentResult,
@@ -111,7 +112,7 @@ function extractToolCalls(
     const result = results.get(block.id);
     return {
       id: block.id,
-      name: block.name,
+      name: canonicalizeClaudeHostToolName(block.name),
       input: block.input ?? {},
       status: result ? (result.isError ? 'error' : 'completed') : 'running',
       result: result?.content,

@@ -39,6 +39,12 @@ import {
   buildPromptWithHistoryContext,
 } from '../../../utils/session';
 import { toClaudeRuntimeModelId } from '../modelSelection';
+import {
+  buildClaudeHostToolRegistration,
+  type ClaudeHostToolRegistration,
+  toClaudeNativeHostToolName,
+} from '../runtime/ClaudeHostToolAdapter';
+import { ClaudeHostToolServer } from '../runtime/ClaudeHostToolServer';
 import { createCustomSpawnFunction } from '../runtime/customSpawn';
 import {
   DISABLED_BUILTIN_SUBAGENTS,
@@ -86,6 +92,7 @@ export interface ClaudeEncodedExecutionRequest {
   readonly restartKey: string;
   readonly mcpServersKey: string;
   readonly allowedTools: ReadonlySet<string> | null;
+  readonly hostToolServer: ClaudeHostToolServer | null;
 }
 
 export interface ClaudeExecutionRequestEncoderDeps {
@@ -140,8 +147,33 @@ export class ClaudeExecutionRequestEncoder {
       ...mcpMentions,
       ...(request.configuration.enabledMcpServers ?? []),
     ]);
-    const mcpServers = this.deps.mcpManager.getActiveServers(enabledMcpServers);
-    const policy = resolveToolPolicy(request);
+    const configuredMcpServers = this.deps.mcpManager.getActiveServers(enabledMcpServers);
+    const hostToolRegistration = buildClaudeHostToolRegistration(
+      this.deps.host.hostTools,
+      request.toolPolicy,
+      sessionConfig.hostToolAccess,
+    );
+    let hostToolServer: ClaudeHostToolServer | null = null;
+    let mcpServers = configuredMcpServers;
+    if (hostToolRegistration.definitions.length > 0) {
+      hostToolServer = new ClaudeHostToolServer({
+        catalog: this.deps.host.hostTools,
+        model: settings.model,
+        registration: hostToolRegistration,
+      });
+      const descriptor = await hostToolServer.start();
+      mcpServers = {
+        ...configuredMcpServers,
+        [descriptor.name]: {
+          type: 'http',
+          url: descriptor.url,
+          headers: Object.fromEntries(
+            (descriptor.headers ?? []).map(header => [header.name, header.value]),
+          ),
+        },
+      };
+    }
+    const policy = resolveToolPolicy(request, hostToolRegistration);
     const systemPrompt = request.configuration.systemInstructions.kind === 'explicit'
       ? [
         request.configuration.systemInstructions.instructions.trim(),
@@ -240,6 +272,7 @@ export class ClaudeExecutionRequestEncoder {
       }),
       mcpServersKey: JSON.stringify(mcpServers),
       allowedTools: policy.allowedTools,
+      hostToolServer,
     };
   }
 
@@ -314,7 +347,10 @@ export class ClaudeExecutionRequestEncoder {
   }
 }
 
-function resolveToolPolicy(request: ProviderExecutionRequest): {
+function resolveToolPolicy(
+  request: ProviderExecutionRequest,
+  hostTools: ClaudeHostToolRegistration,
+): {
   tools?: string[];
   hooks?: { PreToolUse: HookCallbackMatcher[] };
   allowedTools: ReadonlySet<string> | null;
@@ -326,17 +362,26 @@ function resolveToolPolicy(request: ProviderExecutionRequest): {
         allowedTools: new Set(),
       };
     case 'read-only': {
-      const allowedTools = new Set<string>(READ_ONLY_TOOLS);
+      const hostToolNames = hostTools.definitions.map(definition =>
+        toClaudeNativeHostToolName(definition.name)
+      );
+      const allowedTools = new Set<string>([...READ_ONLY_TOOLS, ...hostToolNames]);
       return {
-        tools: [...READ_ONLY_TOOLS],
+        tools: [...allowedTools],
         hooks: {
-          PreToolUse: [createReadOnlyHook()],
+          PreToolUse: [createReadOnlyHook(new Set(hostToolNames))],
         },
         allowedTools,
       };
     }
     case 'allow-list': {
-      const names = uniqueStrings(request.toolPolicy.names);
+      const hostToolNameByCanonicalName = Object.fromEntries(
+        Object.entries(hostTools.canonicalNameByNativeName)
+          .map(([nativeName, canonicalName]) => [canonicalName, nativeName]),
+      );
+      const names = uniqueStrings(request.toolPolicy.names.map(name =>
+        hostToolNameByCanonicalName[name] ?? name
+      ));
       return {
         tools: names,
         allowedTools: new Set(names),
@@ -350,7 +395,9 @@ function resolveToolPolicy(request: ProviderExecutionRequest): {
   }
 }
 
-function createReadOnlyHook(): HookCallbackMatcher {
+function createReadOnlyHook(
+  readOnlyHostToolNames: ReadonlySet<string>,
+): HookCallbackMatcher {
   return {
     hooks: [async (hookInput) => {
       const record = hookInput as unknown as Record<string, unknown>;
@@ -358,7 +405,7 @@ function createReadOnlyHook(): HookCallbackMatcher {
         && typeof record.tool_name === 'string'
         ? record.tool_name
         : '';
-      if (isReadOnlyTool(toolName)) {
+      if (isReadOnlyTool(toolName) || readOnlyHostToolNames.has(toolName)) {
         return { continue: true };
       }
       return {

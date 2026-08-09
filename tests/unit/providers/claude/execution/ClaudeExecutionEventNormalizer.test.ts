@@ -109,4 +109,27 @@ describe('ClaudeExecutionEventNormalizer task tools', () => {
       event: expect.objectContaining({ name: TOOL_TODO_WRITE }),
     }));
   });
+  it('preserves canonical host-tool names in live events', () => {
+    const normalizer = new ClaudeExecutionEventNormalizer();
+    const events = normalizer.normalize(msg({
+      type: 'assistant',
+      message: {
+        content: [{
+          type: 'tool_use',
+          id: 'host-1',
+          name: 'mcp__claudian__periodic_job_list',
+          input: {},
+        }],
+      },
+    }), 'requested');
+
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'output',
+      event: expect.objectContaining({
+        type: 'tool_started',
+        toolCallId: 'host-1',
+        name: 'claudian.periodic_job.list',
+      }),
+    }));
+  });
 });
