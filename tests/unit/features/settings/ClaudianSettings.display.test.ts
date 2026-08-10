@@ -106,11 +106,11 @@ import { ClaudianSettingTab } from '@/features/settings/ClaudianSettings';
 import { PeriodicJobSettings } from '@/features/settings/ui/PeriodicJobSettings';
 import { t } from '@/i18n/i18n';
 
-function createTab(enableDualPane: boolean): {
+function createTab(enableDualPane: boolean, enableFilePane = true): {
   tab: ClaudianSettingTab;
   plugin: Record<string, any>;
 } {
-  const settings = { ...DEFAULT_CLAUDIAN_SETTINGS, enableDualPane };
+  const settings = { ...DEFAULT_CLAUDIAN_SETTINGS, enableDualPane, enableFilePane };
   const plugin = {
     app: {},
     periodicJobs: {
@@ -200,12 +200,28 @@ describe('ClaudianSettingTab display settings', () => {
     (enabled.tab as any).renderGeneralTab(createContainer());
 
     expect(mockRenderedSettingNames).toContain(t('settings.dualPaneSide.name'));
+    expect(mockRenderedSettingNames).toContain(t('settings.enableFilePane.name'));
+    expect(mockRenderedSettingNames.indexOf(t('settings.dualPaneSide.name')))
+      .toBeLessThan(mockRenderedSettingNames.indexOf(t('settings.enableFilePane.name')));
 
     mockRenderedSettingNames.length = 0;
     const disabled = createTab(false);
     (disabled.tab as any).renderGeneralTab(createContainer());
 
     expect(mockRenderedSettingNames).not.toContain(t('settings.dualPaneSide.name'));
+    expect(mockRenderedSettingNames).not.toContain(t('settings.enableFilePane.name'));
+  });
+
+  it('updates the file pane setting and refreshes open dual-pane views', async () => {
+    const { tab, plugin } = createTab(true);
+    const refreshDualPaneLayout = jest.fn();
+    plugin.getAllViews.mockReturnValue([{ refreshDualPaneLayout }]);
+    (tab as any).renderGeneralTab(createContainer());
+
+    await mockToggleChanges.get(t('settings.enableFilePane.name'))?.(false);
+
+    expect(plugin.settings.enableFilePane).toBe(false);
+    expect(refreshDualPaneLayout).toHaveBeenCalledTimes(1);
   });
 
   it('rerenders display settings after dual-pane mode changes', async () => {

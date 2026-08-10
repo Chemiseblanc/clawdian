@@ -61,6 +61,18 @@ describe('ClaudianPlugin', () => {
     ).conversationPersistence;
   }
 
+  function getApplicationShutdownPromise(target: ClaudianPlugin): Promise<void> {
+    const pluginObject: object = target;
+    if (!('applicationShutdownPromise' in pluginObject)) {
+      throw new Error('Plugin shutdown was not started');
+    }
+    const shutdownPromise = pluginObject.applicationShutdownPromise;
+    if (!(shutdownPromise instanceof Promise)) {
+      throw new Error('Plugin shutdown promise is unavailable');
+    }
+    return shutdownPromise;
+  }
+
   function mockMetadataSources(
     ...metadata: Array<{
       id: string;
@@ -1129,9 +1141,7 @@ describe('ClaudianPlugin', () => {
       );
 
       plugin.onunload();
-      await Promise.resolve();
-      await Promise.resolve();
-      await Promise.resolve();
+      await getApplicationShutdownPromise(plugin);
 
       expect(disposeSpy).toHaveBeenCalledTimes(1);
     });
@@ -1152,9 +1162,7 @@ describe('ClaudianPlugin', () => {
         });
 
       plugin.onunload();
-      for (let index = 0; index < 6; index += 1) {
-        await Promise.resolve();
-      }
+      await getApplicationShutdownPromise(plugin);
 
       expect(calls).toEqual(['jobs', 'lifecycle', 'workspaces']);
       stop.mockRestore();
@@ -1162,21 +1170,43 @@ describe('ClaudianPlugin', () => {
       workspaces.mockRestore();
     });
 
-    it('flushes the current tab identity when views are not closed first', async () => {
+    it('drains views before disposing execution and workspace resources', async () => {
       await plugin.onload();
-      const flushCurrentTabState = jest.fn().mockResolvedValue(undefined);
+      let resolveViewDrain!: () => void;
+      const viewDrain = new Promise<void>((resolve) => {
+        resolveViewDrain = resolve;
+      });
+      const prepareForPluginUnload = jest.fn(() => viewDrain);
       mockApp.workspace.getLeavesOfType.mockReturnValue([{
         view: {
-          flushCurrentTabState,
+          prepareForPluginUnload,
           getTabManager: jest.fn(),
         },
       }]);
+      const disposeExecution = jest.spyOn(
+        plugin.executionLifecycleRegistry,
+        'dispose',
+      ).mockResolvedValue(undefined);
+      const disposeWorkspaces = jest.spyOn(
+        ProviderWorkspaceRegistry,
+        'disposeInitialized',
+      ).mockResolvedValue(undefined);
 
       plugin.onunload();
       await Promise.resolve();
-      await Promise.resolve();
 
-      expect(flushCurrentTabState).toHaveBeenCalledTimes(1);
+      expect(prepareForPluginUnload).toHaveBeenCalledTimes(1);
+      expect(disposeExecution).not.toHaveBeenCalled();
+      expect(disposeWorkspaces).not.toHaveBeenCalled();
+
+      resolveViewDrain();
+      await getApplicationShutdownPromise(plugin);
+
+      expect(disposeExecution).toHaveBeenCalledTimes(1);
+      expect(disposeWorkspaces).toHaveBeenCalledTimes(1);
+      expect(disposeExecution.mock.invocationCallOrder[0]).toBeLessThan(
+        disposeWorkspaces.mock.invocationCallOrder[0],
+      );
     });
   });
 

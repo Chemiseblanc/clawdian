@@ -23,15 +23,15 @@ import { MentionCacheCoordinator } from './services/MentionCacheCoordinator';
 import { TabStatePersistenceCoordinator } from './services/TabStatePersistenceCoordinator';
 import { getObsidianLanguage } from './session-manager/ProvisionalNoteNames';
 import { renderSessionGroupToggleIcon } from './session-manager/SessionManagerIcons';
-import {
-  commitProvisionalTab,
-  getTabProviderId,
-  sendTabInputMessageFromExplicitEnterShortcut,
-  updatePlanModeUI,
-} from './tabs/Tab';
+import { getTabProviderId } from './tabs/providerResolution';
 import { TabBar } from './tabs/TabBar';
+import { sendTabInputMessageFromExplicitEnterShortcut } from './tabs/TabInputEvents';
+import { commitProvisionalTab } from './tabs/TabLifecycle';
 import { TabManager } from './tabs/TabManager';
-import type { TabData, TabId } from './tabs/types';
+import { updatePlanModeUI } from './tabs/TabProviderState';
+import type { AssembledTabRuntime, TabId } from './tabs/types';
+import { HorizontalWheelGesture } from './ui/HorizontalWheelGesture';
+import { VaultFileTree } from './ui/vault-file-tree/VaultFileTree';
 import { recalculateUsageForModel } from './utils/usageInfo';
 
 type LoadableView = {
@@ -44,11 +44,14 @@ type SessionSearchScrollState = {
   sessionScrollTop: number;
 };
 
+type SidebarSurface = 'sessions' | 'files';
+
 const WIDE_SESSION_LAYOUT_MIN_WIDTH = 600;
 const MIN_CHAT_PANEL_WIDTH = 320;
 const MIN_SESSION_SIDEBAR_WIDTH = 180;
 const SESSION_RESIZER_WIDTH = 5;
 const SESSION_RESIZE_KEYBOARD_STEP = 16;
+const SIDEBAR_SURFACE_ROTATION: readonly SidebarSurface[] = ['sessions', 'files'];
 
 export class ClaudianView extends ItemView {
   private plugin: FeatureHost;
@@ -80,6 +83,14 @@ export class ClaudianView extends ItemView {
   private historyDropdown: HTMLElement | null = null;
   private historyRenderAbortController: AbortController | null = null;
   private sessionSidebarEl: HTMLElement | null = null;
+  private sidebarSurfaceSwitcherEl: HTMLElement | null = null;
+  private sessionsSurfaceButtonEl: HTMLButtonElement | null = null;
+  private filesSurfaceButtonEl: HTMLButtonElement | null = null;
+  private sessionSurfaceEl: HTMLElement | null = null;
+  private filesSurfaceEl: HTMLElement | null = null;
+  private activeSidebarSurface: SidebarSurface = 'sessions';
+  private readonly sidebarSurfaceWheelGesture = new HorizontalWheelGesture();
+  private vaultFileTree: VaultFileTree | null = null;
   private sessionSidebarResizerEl: HTMLElement | null = null;
   private sessionSidebarRenderAbortController: AbortController | null = null;
   private sessionSidebarResizeObserver: ResizeObserver | null = null;
@@ -104,14 +115,14 @@ export class ClaudianView extends ItemView {
 
   // Debouncing for tab bar updates
   private pendingTabBarUpdate: ScheduledAnimationFrame | null = null;
-  private tabStatePersistence: TabStatePersistenceCoordinator;
+  private tabStatePersistence: TabStatePersistenceCoordinator | null = null;
+  private shutdownSnapshotPromise: Promise<void> | null = null;
+  private viewLifecycleRevision = 0;
+  private viewShutdownStarted = false;
 
   constructor(leaf: WorkspaceLeaf, plugin: FeatureHost) {
     super(leaf);
     this.plugin = plugin;
-    this.tabStatePersistence = new TabStatePersistenceCoordinator(
-      state => this.plugin.storage.setTabManagerState(state),
-    );
 
     // Hover Editor compatibility: Define load as an instance method that can't be
     // overwritten by prototype patching. Hover Editor patches ClaudianView.prototype.load
@@ -186,13 +197,13 @@ export class ClaudianView extends ItemView {
         tab.state.usage = recalculateUsageForModel(tab.state.usage, model, contextWindow);
       }
 
-      tab.ui.modelSelector?.updateDisplay();
-      tab.ui.modelSelector?.renderOptions();
-      tab.ui.modeSelector?.updateDisplay();
-      tab.ui.modeSelector?.renderOptions();
-      tab.ui.thinkingBudgetSelector?.updateDisplay();
-      tab.ui.permissionToggle?.updateDisplay();
-      tab.ui.serviceTierToggle?.updateDisplay();
+      tab.ui.modelSelector.updateDisplay();
+      tab.ui.modelSelector.renderOptions();
+      tab.ui.modeSelector.updateDisplay();
+      tab.ui.modeSelector.renderOptions();
+      tab.ui.thinkingBudgetSelector.updateDisplay();
+      tab.ui.permissionToggle.updateDisplay();
+      tab.ui.serviceTierToggle.updateDisplay();
       tab.dom.inputWrapper.toggleClass(
         'claudian-input-plan-mode',
         providerSettings.permissionMode === 'plan' && capabilities.supportsPlanMode,
@@ -215,7 +226,7 @@ export class ClaudianView extends ItemView {
   /** Updates provider-scoped hidden commands on all tabs after settings changes. */
   updateHiddenProviderCommands(): void {
     for (const tab of this.tabManager?.getAllTabs() ?? []) {
-      tab.ui.slashCommandDropdown?.setHiddenCommands(
+      tab.ui.slashCommandDropdown.setHiddenCommands(
         getHiddenProviderCommandSet(this.plugin.settings, getTabProviderId(tab, this.plugin)),
       );
     }
@@ -231,6 +242,14 @@ export class ClaudianView extends ItemView {
   }
 
   private async onOpenImpl() {
+    const previousLifecycleWasClosing = this.viewShutdownStarted === true;
+    const shutdownSnapshotPromise = previousLifecycleWasClosing
+      ? this.shutdownSnapshotPromise
+      : null;
+    this.viewShutdownStarted = false;
+    const lifecycleRevision = (this.viewLifecycleRevision ?? 0) + 1;
+    this.viewLifecycleRevision = lifecycleRevision;
+
     // Guard: Hover Editor and similar plugins may call onOpen before DOM is ready.
     // containerEl must exist before we can access contentEl or create elements.
     if (!this.containerEl) {
@@ -256,7 +275,30 @@ export class ClaudianView extends ItemView {
     this.buildViewLayout();
     if (!this.tabContentEl) return;
 
-    this.tabManager = new TabManager(
+    let tabStatePersistence = this.tabStatePersistence;
+    if (!previousLifecycleWasClosing || !tabStatePersistence) {
+      if (!previousLifecycleWasClosing) {
+        tabStatePersistence?.dispose();
+      }
+      tabStatePersistence = new TabStatePersistenceCoordinator(
+        state => this.plugin.storage.setTabManagerState(state),
+      );
+    }
+    this.tabStatePersistence = tabStatePersistence;
+    try {
+      if (shutdownSnapshotPromise) {
+        await shutdownSnapshotPromise;
+      }
+      await tabStatePersistence.flush();
+    } catch {
+      // Persistence failures are reported at the storage boundary; reopening must continue.
+    }
+    if (
+      !this.isViewLifecycleCurrent(lifecycleRevision)
+      || this.tabStatePersistence !== tabStatePersistence
+    ) return;
+
+    const tabManager = new TabManager(
       this.plugin,
       this.tabContentEl,
       this,
@@ -273,7 +315,7 @@ export class ClaudianView extends ItemView {
           this.notifyConversationNavigationChanged();
           this.updateInputLocation();
           this.syncProviderBrandColor();
-          this.persistCurrentTabState();
+          this.persistCurrentTabState(tabManager, tabStatePersistence);
         },
         onTabSwitched: () => {
           this.updateTabBar();
@@ -285,7 +327,7 @@ export class ClaudianView extends ItemView {
           this.updateTabBar();
           this.notifyConversationNavigationChanged();
           this.updateInputLocation();
-          this.persistCurrentTabState();
+          this.persistCurrentTabState(tabManager, tabStatePersistence);
         },
         onTabStreamingChanged: () => {
           this.updateTabBar();
@@ -298,10 +340,15 @@ export class ClaudianView extends ItemView {
           this.notifyConversationNavigationChanged();
         },
         onTabConversationChanged: () => {
-          this.updateTabBar();
-          this.notifyConversationNavigationChanged();
-          this.syncProviderBrandColor();
-          this.persistCurrentTabState();
+          if (
+            this.tabManager === tabManager
+            && this.isViewLifecycleCurrent(lifecycleRevision)
+          ) {
+            this.updateTabBar();
+            this.notifyConversationNavigationChanged();
+            this.syncProviderBrandColor();
+          }
+          this.persistCurrentTabState(tabManager, tabStatePersistence);
         },
         onTabProviderChanged: () => {
           this.updateTabBar();
@@ -309,14 +356,16 @@ export class ClaudianView extends ItemView {
         },
       }
     );
+    this.tabManager = tabManager;
     this.mentionCacheCoordinator = new MentionCacheCoordinator(
-      () => (this.tabManager?.getAllTabs() ?? []).map(tab => ({
+      () => tabManager.getAllTabs().map(tab => ({
         fileContextManager: tab.ui.fileContextManager,
       })),
     );
 
     this.wireEventHandlers();
-    await this.restoreCurrentTab();
+    await this.restoreCurrentTab(lifecycleRevision);
+    if (!this.isViewLifecycleCurrent(lifecycleRevision)) return;
     this.syncProviderBrandColor();
     this.attachNavRowContentToInputFooter();
     this.updateInputLocation();
@@ -325,12 +374,23 @@ export class ClaudianView extends ItemView {
   }
 
   async onClose() {
+    this.viewShutdownStarted = true;
+    const lifecycleRevision = (this.viewLifecycleRevision ?? 0) + 1;
+    this.viewLifecycleRevision = lifecycleRevision;
+    const tabManager = this.tabManager;
+    const mentionCacheCoordinator = this.mentionCacheCoordinator;
+    const tabBar = this.tabBar;
+    const scope = this.scope;
+    const tabStatePersistence = this.tabStatePersistence;
+    tabManager?.beginShutdown();
     this.sessionLayoutRequestRevision += 1;
     this.clearSessionSearchDismissHandlers();
     this.cancelHistoryRendering();
     this.cancelSessionSidebarRendering();
     this.disconnectSessionSidebarLayoutObserver();
     this.stopSessionSidebarResize();
+    this.vaultFileTree?.destroy();
+    this.vaultFileTree = null;
     if (this.pendingTabBarUpdate !== null) {
       cancelScheduledAnimationFrame(this.pendingTabBarUpdate);
       this.pendingTabBarUpdate = null;
@@ -340,24 +400,74 @@ export class ClaudianView extends ItemView {
       this.plugin.app.vault.offref(ref);
     }
     this.eventRefs = [];
+    this.restoreActiveInputToTabContent();
 
+    const shutdownSnapshotPromise = this.ensureShutdownSnapshot(
+      tabManager,
+      tabStatePersistence,
+    );
     try {
-      await this.flushCurrentTabState();
+      await shutdownSnapshotPromise;
+      const ownsCloseLifecycle = this.viewShutdownStarted === true
+        && this.viewLifecycleRevision === lifecycleRevision;
+      if (ownsCloseLifecycle) {
+        tabStatePersistence?.dispose();
+        if (this.tabStatePersistence === tabStatePersistence) {
+          this.tabStatePersistence = null;
+        }
+      }
+      try {
+        await tabManager?.destroy();
+      } finally {
+        if (this.tabManager === tabManager) this.tabManager = null;
+        if (this.mentionCacheCoordinator === mentionCacheCoordinator) {
+          this.mentionCacheCoordinator = null;
+        }
+        tabBar?.destroy();
+        if (this.tabBar === tabBar) this.tabBar = null;
+        if (this.scope === scope) this.scope = null;
+      }
+    } finally {
+      if (this.shutdownSnapshotPromise === shutdownSnapshotPromise) {
+        this.shutdownSnapshotPromise = null;
+      }
+    }
+  }
+
+  async prepareForPluginUnload(): Promise<void> {
+    const tabManager = this.tabManager;
+    tabManager?.beginShutdown();
+    await this.ensureShutdownSnapshot(tabManager, this.tabStatePersistence);
+  }
+
+  private ensureShutdownSnapshot(
+    tabManager: TabManager | null,
+    tabStatePersistence: TabStatePersistenceCoordinator | null,
+  ): Promise<void> {
+    if (this.shutdownSnapshotPromise) return this.shutdownSnapshotPromise;
+    const shutdownSnapshotPromise = this.captureShutdownSnapshot(
+      tabManager,
+      tabStatePersistence,
+    );
+    this.shutdownSnapshotPromise = shutdownSnapshotPromise;
+    return shutdownSnapshotPromise;
+  }
+
+  private async captureShutdownSnapshot(
+    tabManager: TabManager | null,
+    tabStatePersistence: TabStatePersistenceCoordinator | null,
+  ): Promise<void> {
+    try {
+      await tabManager?.drainForShutdownSnapshot();
+    } catch {
+      // Teardown reports drain failures; identity persistence must still be attempted.
+    }
+    try {
+      await this.flushCurrentTabState(tabManager, tabStatePersistence);
     } catch {
       // The storage boundary reports persistence failures. Teardown must still complete.
     } finally {
-      this.tabStatePersistence?.dispose();
-      try {
-        this.restoreActiveInputToTabContent();
-        await this.tabManager?.destroy();
-      } finally {
-        this.tabManager = null;
-        this.mentionCacheCoordinator = null;
-
-        this.tabBar?.destroy();
-        this.tabBar = null;
-        this.scope = null;
-      }
+      tabManager?.sealShutdownSnapshot();
     }
   }
 
@@ -387,6 +497,30 @@ export class ClaudianView extends ItemView {
     });
 
     this.sessionSidebarEl = this.viewContainerEl.createDiv({ cls: 'claudian-session-sidebar' });
+    this.sessionSidebarEl.addEventListener('wheel', (event) => {
+      this.handleSidebarSurfaceWheel(event);
+    }, { passive: false });
+    this.sessionSurfaceEl = this.sessionSidebarEl.createDiv({ cls: 'claudian-session-surface' });
+    this.filesSurfaceEl = this.sessionSidebarEl.createDiv({ cls: 'claudian-files-surface' });
+    this.sidebarSurfaceSwitcherEl = this.sessionSidebarEl.createDiv({
+      cls: 'claudian-sidebar-surface-switcher',
+    });
+    this.sidebarSurfaceSwitcherEl.setAttribute('role', 'group');
+    this.sidebarSurfaceSwitcherEl.setAttribute('aria-label', 'Sidebar view');
+    this.sessionsSurfaceButtonEl = this.sidebarSurfaceSwitcherEl.createEl('button', {
+      cls: 'claudian-sidebar-surface-button claudian-sidebar-surface-button--sessions',
+      attr: { 'aria-label': 'Sessions', type: 'button' },
+    });
+    this.sessionsSurfaceButtonEl.addEventListener('click', () => this.showSessions());
+    this.filesSurfaceButtonEl = this.sidebarSurfaceSwitcherEl.createEl('button', {
+      cls: 'claudian-sidebar-surface-button claudian-sidebar-surface-button--files',
+      attr: { 'aria-label': 'Files', type: 'button' },
+    });
+    this.filesSurfaceButtonEl.addEventListener('click', () => this.showVaultFiles());
+    if (this.activeSidebarSurface !== 'files') {
+      this.activeSidebarSurface = 'sessions';
+    }
+    this.updateSidebarSurfaceVisibility();
   }
 
   /**
@@ -474,11 +608,27 @@ export class ClaudianView extends ItemView {
     return true;
   }
 
-  async handleNewSessionPlan(planContent: string): Promise<boolean> {
+  async handleNewSessionPlan(
+    planContent: string,
+    isSourceLive: () => boolean = () => true,
+  ): Promise<boolean> {
     if (!this.isWideSessionLayout) return false;
+    if (!isSourceLive()) return true;
 
-    await this.createNewTab();
-    const inputController = this.tabManager?.getActiveTab()?.controllers.inputController;
+    const targetTab = await this.createNewTab();
+    if (!targetTab) {
+      throw new Error('New conversation input is unavailable');
+    }
+    if (!isSourceLive()) {
+      if (
+        targetTab.conversationId === null
+        && targetTab.session.userOwnershipRevision === 0
+      ) {
+        await this.tabManager?.discardTab(targetTab.id);
+      }
+      return true;
+    }
+    const inputController = targetTab.controllers.inputController;
     if (!inputController) {
       throw new Error('New conversation input is unavailable');
     }
@@ -494,10 +644,11 @@ export class ClaudianView extends ItemView {
 
   refreshDualPaneLayout(): void {
     if (!this.viewContainerEl) return;
+    this.updateSidebarSurfaceVisibility();
     this.updateSessionSidebarLayout(this.viewContainerEl.getBoundingClientRect().width);
   }
 
-  private findMostRecentUnboundTab(): TabData | null {
+  private findMostRecentUnboundTab(): AssembledTabRuntime | null {
     const tabs = this.tabManager?.getAllTabs() ?? [];
     for (let index = tabs.length - 1; index >= 0; index -= 1) {
       if (tabs[index].conversationId === null) {
@@ -593,11 +744,12 @@ export class ClaudianView extends ItemView {
     }
   }
 
-  async createNewTab(): Promise<void> {
+  async createNewTab(): Promise<AssembledTabRuntime | null> {
     const tab = await this.tabManager?.createTab();
-    if (!tab) return;
+    if (!tab) return null;
     this.updateTabBarVisibility();
     tab.dom.inputEl.focus();
+    return tab;
   }
 
   private updateTabBar(): void {
@@ -689,7 +841,7 @@ export class ClaudianView extends ItemView {
     if (this.historyDropdown?.hasClass('visible')) {
       this.renderHistoryDropdown();
     }
-    if (this.isWideSessionLayout) {
+    if (this.isWideSessionLayout && this.activeSidebarSurface !== 'files') {
       this.renderSessionSidebar();
     }
   }
@@ -715,7 +867,13 @@ export class ClaudianView extends ItemView {
   }
 
   private renderSessionSidebar(): void {
-    if (!this.sessionSidebarEl || !this.sessionSidebarDirty || !this.isWideSessionLayout) return;
+    const sessionSurfaceEl = this.sessionSurfaceEl ?? this.sessionSidebarEl;
+    if (
+      !sessionSurfaceEl
+      || !this.sessionSidebarDirty
+      || !this.isWideSessionLayout
+      || this.activeSidebarSurface === 'files'
+    ) return;
     if (this.isSessionSearchComposing) return;
 
     const previousSearchInput = this.sessionSearchInputEl;
@@ -734,8 +892,8 @@ export class ClaudianView extends ItemView {
       this.sessionSearchFieldEl = null;
       this.sessionSearchInputEl = null;
       this.sessionGroupToggleButtonEl = null;
-      this.renderHistorySurface(this.sessionSidebarEl, abortController.signal, 'sessions');
-      this.buildSessionHeaderActions(this.sessionSidebarEl);
+      this.renderHistorySurface(sessionSurfaceEl, abortController.signal, 'sessions');
+      this.buildSessionHeaderActions(sessionSurfaceEl);
       if (shouldRestoreSearchFocus) {
         this.focusSessionSearchInput();
       }
@@ -994,6 +1152,84 @@ export class ClaudianView extends ItemView {
     this.updateNewTabButtonVisibility();
   }
 
+  private showVaultFiles(): void {
+    if (
+      !this.isWideSessionLayout
+      || !this.requestedWideSessionLayout
+      || !this.filesSurfaceEl
+      || !(this.plugin?.settings?.enableFilePane ?? true)
+    ) return;
+    this.activeSidebarSurface = 'files';
+    this.updateSidebarSurfaceVisibility();
+
+    if (this.vaultFileTree) {
+      this.vaultFileTree.setActive(true);
+      return;
+    }
+    this.vaultFileTree = this.createVaultFileTree(this.filesSurfaceEl);
+    void this.vaultFileTree.mount();
+  }
+
+  private showSessions(): void {
+    this.activeSidebarSurface = 'sessions';
+    this.vaultFileTree?.setActive(false);
+    this.updateSidebarSurfaceVisibility();
+    this.renderSessionSidebar();
+  }
+
+  private handleSidebarSurfaceWheel(event: WheelEvent): void {
+    if (
+      !this.isWideSessionLayout
+      || !this.requestedWideSessionLayout
+      || !(this.plugin?.settings?.enableFilePane ?? true)
+    ) return;
+
+    if (!this.sidebarSurfaceWheelGesture.consume(event)) return;
+
+    event.preventDefault();
+    this.rotateSidebarSurface();
+  }
+
+  private rotateSidebarSurface(): void {
+    const currentIndex = SIDEBAR_SURFACE_ROTATION.indexOf(this.activeSidebarSurface);
+    const nextIndex = (Math.max(currentIndex, 0) + 1) % SIDEBAR_SURFACE_ROTATION.length;
+    const nextSurface = SIDEBAR_SURFACE_ROTATION[nextIndex];
+
+    if (nextSurface === 'files') {
+      this.showVaultFiles();
+    } else {
+      this.showSessions();
+    }
+  }
+
+  private createVaultFileTree(hostEl: HTMLElement): VaultFileTree {
+    return new VaultFileTree({
+      app: this.plugin.app,
+      hostEl,
+    });
+  }
+
+  private updateSidebarSurfaceVisibility(): void {
+    const filePaneEnabled = this.plugin?.settings?.enableFilePane ?? true;
+    if (!filePaneEnabled) {
+      this.sidebarSurfaceWheelGesture?.reset();
+      this.activeSidebarSurface = 'sessions';
+      this.vaultFileTree?.destroy();
+      this.vaultFileTree = null;
+    }
+
+    this.sidebarSurfaceSwitcherEl?.toggleClass('claudian-hidden', !filePaneEnabled);
+    const showFiles = filePaneEnabled && this.activeSidebarSurface === 'files';
+    this.sessionSurfaceEl?.toggleClass('claudian-hidden', showFiles);
+    this.sessionSurfaceEl?.setAttribute('aria-hidden', String(showFiles));
+    this.filesSurfaceEl?.toggleClass('claudian-hidden', !showFiles);
+    this.filesSurfaceEl?.setAttribute('aria-hidden', String(!showFiles));
+    this.sessionsSurfaceButtonEl?.toggleClass('is-active', !showFiles);
+    this.sessionsSurfaceButtonEl?.setAttribute('aria-pressed', String(!showFiles));
+    this.filesSurfaceButtonEl?.toggleClass('is-active', showFiles);
+    this.filesSurfaceButtonEl?.setAttribute('aria-pressed', String(showFiles));
+  }
+
   private requestSessionNew(): void {
     if (this.isArchiveSessionView) {
       this.setArchiveSessionView(false);
@@ -1048,8 +1284,8 @@ export class ClaudianView extends ItemView {
     }
 
     try {
-      tab.ui.fileContextManager?.resetForNewConversation();
-      tab.ui.fileContextManager?.setCurrentNote(notePath);
+      tab.ui.fileContextManager.resetForNewConversation();
+      tab.ui.fileContextManager.setCurrentNote(notePath);
       this.updateTabBarVisibility();
       if (this.tabManager.getActiveTabId() === tab.id) {
         tab.dom.inputEl.focus();
@@ -1062,7 +1298,7 @@ export class ClaudianView extends ItemView {
 
   private handleWorkspaceFileOpen(file: TFile): void {
     if (this.linkedNoteNavigationDepth > 0) return;
-    this.tabManager?.getActiveTab()?.ui.fileContextManager?.handleFileOpen(file);
+    this.tabManager?.getActiveTab()?.ui.fileContextManager.handleFileOpen(file);
   }
 
   private activateSessionSearch(): void {
@@ -1323,7 +1559,7 @@ export class ClaudianView extends ItemView {
 
   private getOpenConversationTabs(conversationId: string): Array<{
     manager: FeatureTabManagerHost;
-    tab: TabData;
+    tab: AssembledTabRuntime;
   }> {
     const managers = new Set(
       this.plugin.getAllViews()
@@ -1334,7 +1570,7 @@ export class ClaudianView extends ItemView {
       managers.add(this.tabManager);
     }
 
-    const openTabs: Array<{ manager: FeatureTabManagerHost; tab: TabData }> = [];
+    const openTabs: Array<{ manager: FeatureTabManagerHost; tab: AssembledTabRuntime }> = [];
     for (const manager of managers) {
       for (const tab of manager.getAllTabs()) {
         if (tab.conversationId === conversationId) {
@@ -1620,6 +1856,10 @@ export class ClaudianView extends ItemView {
 
     const isDualPaneEnabled = this.plugin?.settings?.enableDualPane ?? true;
     const shouldUseWideLayout = isDualPaneEnabled && width >= WIDE_SESSION_LAYOUT_MIN_WIDTH;
+    if (!shouldUseWideLayout) {
+      this.sidebarSurfaceWheelGesture?.reset();
+      this.vaultFileTree?.setActive(false);
+    }
     if (shouldUseWideLayout === this.requestedWideSessionLayout) {
       if (shouldUseWideLayout && this.isWideSessionLayout) {
         if (this.sessionSidebarWidth !== null) {
@@ -1640,6 +1880,12 @@ export class ClaudianView extends ItemView {
       }
       this.historyDropdown?.removeClass('visible');
       this.cancelHistoryRendering();
+      if (
+        this.activeSidebarSurface === 'files'
+        && (this.plugin?.settings?.enableFilePane ?? true)
+      ) {
+        this.vaultFileTree?.setActive(true);
+      }
       this.renderSessionSidebar();
       return;
     }
@@ -1690,6 +1936,7 @@ export class ClaudianView extends ItemView {
     ) return;
 
     this.isWideSessionLayout = false;
+    this.vaultFileTree?.setActive(false);
     this.viewContainerEl.removeClass('claudian-wide-session-layout');
   }
 
@@ -1796,12 +2043,12 @@ export class ClaudianView extends ItemView {
     };
   }
 
-  private findTabWithConversation(conversationId: string): TabData | null {
+  private findTabWithConversation(conversationId: string): AssembledTabRuntime | null {
     const tabs = this.tabManager?.getAllTabs() ?? [];
     return tabs.find(tab => tab.conversationId === conversationId) ?? null;
   }
 
-  private getHistoryTabIndex(tab: TabData): number | undefined {
+  private getHistoryTabIndex(tab: AssembledTabRuntime): number | undefined {
     const index = this.tabManager?.getAllTabs().findIndex(candidate => candidate.id === tab.id) ?? -1;
     return index >= 0 ? index + 1 : undefined;
   }
@@ -1866,7 +2113,12 @@ export class ClaudianView extends ItemView {
     // Returning false consumes Escape before Obsidian uses it for pane navigation.
     this.scope = new Scope(this.app.scope);
     this.scope.register([], 'Escape', (e: KeyboardEvent) => {
-      if (e.isComposing || this.isSessionSearchComposing) return;
+      if (
+        e.isComposing
+        || this.isSessionSearchComposing
+        || this.vaultFileTree?.isComposingSearch()
+      ) return;
+      if (this.vaultFileTree?.handleEscape(e)) return false;
       if (this.isSessionSearchActive) {
         this.closeSessionSearch();
         return false;
@@ -1874,7 +2126,7 @@ export class ClaudianView extends ItemView {
       if (!e.defaultPrevented) {
         const activeTab = this.tabManager?.getActiveTab();
         if (activeTab?.state.isStreaming) {
-          activeTab.controllers.inputController?.cancelStreaming();
+          activeTab.controllers.inputController.cancelStreaming();
         }
       }
       return false;
@@ -1920,28 +2172,45 @@ export class ClaudianView extends ItemView {
   // Current tab persistence
   // ============================================
 
-  private async restoreCurrentTab(): Promise<void> {
-    if (!this.tabManager) return;
+  private isViewLifecycleCurrent(revision: number): boolean {
+    return this.viewShutdownStarted !== true
+      && (this.viewLifecycleRevision ?? 0) === revision;
+  }
+
+  private async restoreCurrentTab(
+    lifecycleRevision = this.viewLifecycleRevision ?? 0,
+  ): Promise<void> {
+    const tabManager = this.tabManager;
+    if (!tabManager) return;
 
     const persistedState = await this.plugin.storage.getTabManagerState();
+    if (
+      !this.isViewLifecycleCurrent(lifecycleRevision)
+      || this.tabManager !== tabManager
+    ) return;
     const currentTab = persistedState?.openTabs.find(
       tab => tab.tabId === persistedState.activeTabId,
     );
     if (currentTab) {
-      await this.tabManager.createTab(currentTab.conversationId, currentTab.tabId);
+      await tabManager.createTab(currentTab.conversationId, currentTab.tabId);
       return;
     }
 
-    await this.tabManager.createTab();
+    await tabManager.createTab();
   }
 
-  private persistCurrentTabState(): void {
-    const state = this.getPersistedCurrentTabState();
-    if (state) this.tabStatePersistence?.update(state);
+  private persistCurrentTabState(
+    tabManager: Pick<TabManager, 'getActiveTab'> | null = this.tabManager,
+    persistence: Pick<TabStatePersistenceCoordinator, 'update'> | null = this.tabStatePersistence,
+  ): void {
+    const state = this.getPersistedCurrentTabState(tabManager);
+    if (state) persistence?.update(state);
   }
 
-  getPersistedCurrentTabState(): AppTabManagerState | null {
-    const activeTab = this.tabManager?.getActiveTab();
+  getPersistedCurrentTabState(
+    tabManager: Pick<TabManager, 'getActiveTab'> | null = this.tabManager,
+  ): AppTabManagerState | null {
+    const activeTab = tabManager?.getActiveTab();
     if (!activeTab) return null;
 
     return {
@@ -1954,11 +2223,16 @@ export class ClaudianView extends ItemView {
   }
 
   /** Flushes the current tab identity before view or plugin shutdown. */
-  async flushCurrentTabState(): Promise<void> {
-    const state = this.getPersistedCurrentTabState();
-    if (!state || !this.tabStatePersistence) return;
-    this.tabStatePersistence.update(state);
-    await this.tabStatePersistence.flush();
+  async flushCurrentTabState(
+    tabManager: Pick<TabManager, 'getActiveTab'> | null = this.tabManager,
+    persistence: Pick<TabStatePersistenceCoordinator, 'flush' | 'update'> | null = (
+      this.tabStatePersistence
+    ),
+  ): Promise<void> {
+    const state = this.getPersistedCurrentTabState(tabManager);
+    if (!state || !persistence) return;
+    persistence.update(state);
+    await persistence.flush();
   }
 
   // ============================================
@@ -1966,7 +2240,7 @@ export class ClaudianView extends ItemView {
   // ============================================
 
   /** Gets the currently active tab. */
-  getActiveTab(): TabData | null {
+  getActiveTab(): AssembledTabRuntime | null {
     return this.tabManager?.getActiveTab() ?? null;
   }
 

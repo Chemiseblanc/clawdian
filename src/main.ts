@@ -73,7 +73,6 @@ import { type InlineEditContext, InlineEditModal } from './features/inline-edit/
 import { ClaudianSettingTab } from './features/settings/ClaudianSettings';
 import { setLocale } from './i18n/i18n';
 import type { Locale } from './i18n/types';
-import { OPENCODE_PLAN_MODE_ID, OPENCODE_SAFE_MODE_ID } from './providers/opencode/modes';
 import { buildCursorContext } from './utils/editor';
 import { revealWorkspaceLeaf } from './utils/obsidianCompat';
 import { getVaultPath } from './utils/path';
@@ -152,6 +151,7 @@ export default class ClaudianPlugin extends Plugin {
   private remainingSessionMetadataLoad: Promise<void> | null = null;
   private providerChatOptionsChangeTail: Promise<void> = Promise.resolve();
   private isUnloading = false;
+  private applicationShutdownPromise: Promise<void> | null = null;
 
   get executionPersistence(): ChatExecutionPersistence {
     return this.conversationRepository;
@@ -339,23 +339,30 @@ export default class ClaudianPlugin extends Plugin {
       this.sessionMetadataLoadTimer = null;
     }
     StartupProfiler.freeze();
-    void Promise.all(
-      this.getAllViews().map(view => view.flushCurrentTabState()),
-    ).catch(() => undefined);
-    void this.disposeProviderResourcesInOrder().catch(() => undefined);
+    this.applicationShutdownPromise ??= this.shutdownApplication();
+    void this.applicationShutdownPromise.catch(() => undefined);
   }
 
-  private async disposeProviderResourcesInOrder(): Promise<void> {
+  private async shutdownApplication(): Promise<void> {
+    await Promise.allSettled(
+      this.getAllViews().map(view => view.prepareForPluginUnload()),
+    );
     try {
       if (this.periodicJobsService) {
         await this.periodicJobsService.stop();
       }
-    } finally {
-      try {
-        await this.executionLifecycleRegistry.dispose();
-      } finally {
-        await ProviderWorkspaceRegistry.disposeInitialized();
-      }
+    } catch {
+      // Continue releasing execution resources if scheduled job cleanup fails.
+    }
+    try {
+      await this.executionLifecycleRegistry.dispose();
+    } catch {
+      // Continue releasing provider workspaces even if execution cleanup fails.
+    }
+    try {
+      await ProviderWorkspaceRegistry.disposeInitialized();
+    } catch {
+      // Obsidian teardown has no error channel; workspace cleanup is best effort.
     }
   }
 
@@ -520,16 +527,6 @@ export default class ClaudianPlugin extends Plugin {
         }
       }
     }
-    const opencodeConfig = this.settings.providerConfigs?.opencode;
-    if (
-      opencodeConfig
-      && typeof opencodeConfig === 'object'
-      && !Array.isArray(opencodeConfig)
-      && opencodeConfig.selectedMode === OPENCODE_PLAN_MODE_ID
-    ) {
-      opencodeConfig.selectedMode = OPENCODE_SAFE_MODE_ID;
-    }
-
     const didNormalizeProviderSelection = ProviderSettingsCoordinator.normalizeProviderSelection(
       this.settings,
     );

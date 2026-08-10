@@ -82,6 +82,7 @@ describe('types.ts', () => {
 
     it('should enable the right-side dual pane by default', () => {
       expect(DEFAULT_SETTINGS.enableDualPane).toBe(true);
+      expect(DEFAULT_SETTINGS.enableFilePane).toBe(true);
       expect(DEFAULT_SETTINGS.dualPaneSide).toBe('right');
     });
   });
@@ -124,6 +125,7 @@ describe('types.ts', () => {
         expandFileEditsByDefault: false,
         chatViewPlacement: 'right-sidebar',
         enableDualPane: true,
+        enableFilePane: true,
         dualPaneSide: 'right',
         hiddenProviderCommands: {
           claude: [],
@@ -182,6 +184,7 @@ describe('types.ts', () => {
         expandFileEditsByDefault: false,
         chatViewPlacement: 'right-sidebar',
         enableDualPane: true,
+        enableFilePane: true,
         dualPaneSide: 'right',
         hiddenProviderCommands: {
           claude: [],
@@ -241,6 +244,7 @@ describe('types.ts', () => {
         expandFileEditsByDefault: true,
         chatViewPlacement: 'right-sidebar',
         enableDualPane: false,
+        enableFilePane: false,
         dualPaneSide: 'left',
         hiddenProviderCommands: {
           claude: [],

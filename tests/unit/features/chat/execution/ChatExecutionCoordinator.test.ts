@@ -2322,7 +2322,11 @@ describe('ChatExecutionCoordinator', () => {
       sessionId: 'native-current',
       resumeAt: 'assistant-1',
     });
-    await harness.coordinator.copyInputsForFork('conversation-2', 'assistant-1');
+    await harness.coordinator.copyInputsForFork(
+      'conversation-1',
+      'conversation-2',
+      'assistant-1',
+    );
     expect(harness.repository.copyConversationInputsForFork).toHaveBeenCalledWith(
       'conversation-1',
       'conversation-2',
