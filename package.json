@@ -1,6 +1,6 @@
 {
   "name": "clawdian",
-  "version": "2.2.0",
+  "version": "2.2.1",
   "description": "Clawdian - An agentic environment for Obsidian Notes",
   "main": "main.js",
   "engines": {
