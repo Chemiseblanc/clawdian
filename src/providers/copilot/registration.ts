@@ -1,4 +1,6 @@
 import { NOOP_TASK_RESULT_INTERPRETER } from '../../core/providers/NoopTaskResultInterpreter';
+import { getProviderConfig } from '../../core/providers/providerConfig';
+import { hasStoredConfigNormalization } from '../../core/providers/settings/storedSettings';
 import type { ProviderModule } from '../../core/providers/types';
 import {
   copilotWorkspaceRegistration,
@@ -24,8 +26,12 @@ export const copilotProviderRegistration: ProviderModule = {
   settingsStorage: {
     hostScopedFields: ['cliPathsByHost', 'catalogsByHost'],
     normalizeStored(target, stored) {
+      const storedConfig = getProviderConfig(stored, 'copilot');
       updateCopilotProviderSettings(target, getCopilotProviderSettings(stored));
-      return false;
+      return hasStoredConfigNormalization(
+        storedConfig,
+        getProviderConfig(target, 'copilot'),
+      );
     },
   },
   createExecutionBackend: (plugin) => {

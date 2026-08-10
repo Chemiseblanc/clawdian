@@ -1,6 +1,7 @@
 import { getProviderConfig, setProviderConfig } from '../../core/providers/providerConfig';
 import { getProviderEnvironmentVariables } from '../../core/providers/providerEnvironment';
 import { normalizeHostnameStringMap } from '../../core/providers/settings/HostnameStringMap';
+import { readStoredBoolean, readStoredString } from '../../core/providers/settings/storedSettings';
 import type { HostnameCliPaths } from '../../core/types/settings';
 import { getHostnameKey } from '../../utils/env';
 import { ensureProviderProjectionMap } from './internal/providerProjection';
@@ -125,17 +126,19 @@ export function getOmpProviderSettings(settings: Record<string, unknown>): OmpPr
   const persistableIds = getPersistableOmpModelIds(settings, visibleModels);
 
   return {
-    cliPath: (config.cliPath as string | undefined)
-      ?? DEFAULT_OMP_PROVIDER_SETTINGS.cliPath,
+    cliPath: readStoredString(config.cliPath, DEFAULT_OMP_PROVIDER_SETTINGS.cliPath),
     cliPathsByHost,
     discoveredModels,
-    enabled: (config.enabled as boolean | undefined)
-      ?? DEFAULT_OMP_PROVIDER_SETTINGS.enabled,
-    environmentHash: (config.environmentHash as string | undefined)
-      ?? DEFAULT_OMP_PROVIDER_SETTINGS.environmentHash,
-    environmentVariables: (config.environmentVariables as string | undefined)
-      ?? getProviderEnvironmentVariables(settings, 'omp')
-      ?? DEFAULT_OMP_PROVIDER_SETTINGS.environmentVariables,
+    enabled: readStoredBoolean(config.enabled, DEFAULT_OMP_PROVIDER_SETTINGS.enabled),
+    environmentHash: readStoredString(
+      config.environmentHash,
+      DEFAULT_OMP_PROVIDER_SETTINGS.environmentHash,
+    ),
+    environmentVariables: readStoredString(
+      config.environmentVariables,
+      getProviderEnvironmentVariables(settings, 'omp')
+        ?? DEFAULT_OMP_PROVIDER_SETTINGS.environmentVariables,
+    ),
     modelAliases: normalizeOmpModelAliasesForPersistableIds(
       config.modelAliases,
       discoveredModels,

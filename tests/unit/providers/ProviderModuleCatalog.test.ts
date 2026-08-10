@@ -65,9 +65,11 @@ describe('built-in ProviderModule catalog', () => {
     const defaultEnabled: Record<string, boolean> = {
       claude: true,
       codex: false,
+      copilot: false,
       grok: false,
       opencode: false,
       pi: false,
+      omp: false,
     };
 
     for (const module of BUILT_IN_PROVIDER_MODULES) {

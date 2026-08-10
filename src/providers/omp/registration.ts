@@ -1,4 +1,6 @@
 import { NOOP_TASK_RESULT_INTERPRETER } from '../../core/providers/NoopTaskResultInterpreter';
+import { getProviderConfig } from '../../core/providers/providerConfig';
+import { hasStoredConfigNormalization } from '../../core/providers/settings/storedSettings';
 import type { ProviderModule } from '../../core/providers/types';
 import {
   getOmpWorkspaceServices,
@@ -38,8 +40,12 @@ export const ompProviderRegistration: ProviderModule = {
   settingsStorage: {
     hostScopedFields: ['cliPathsByHost'],
     normalizeStored(target, stored) {
+      const storedConfig = getProviderConfig(stored, 'omp');
       updateOmpProviderSettings(target, getOmpProviderSettings(stored));
-      return false;
+      return hasStoredConfigNormalization(
+        storedConfig,
+        getProviderConfig(target, 'omp'),
+      );
     },
   },
   taskResultInterpreter: NOOP_TASK_RESULT_INTERPRETER,
