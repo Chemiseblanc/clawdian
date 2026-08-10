@@ -13,7 +13,6 @@ import type {
   PeriodicJobDraft,
   PeriodicJobRunTrigger,
 } from '../../core/types';
-import type { PeriodicJobsPort } from '../../features/FeatureHost';
 import type { SettingsCoordinator } from '../settings/SettingsCoordinator';
 
 export interface PeriodicJobsDependencies {
@@ -50,7 +49,7 @@ const JOB_ALREADY_RUNNING_MESSAGE = 'Periodic job is already running.';
 const CLOSED_DURING_RUN_MESSAGE = 'Obsidian closed before the job completed.';
 const EMPTY_SUCCESS_MESSAGE = 'Completed without a text response.';
 
-export class PeriodicJobsService implements PeriodicJobsPort {
+export class PeriodicJobsService {
   private readonly activeRuns = new Map<string, ActiveRun>();
   private readonly listeners = new Set<() => void>();
   private readonly pendingRuns = new Set<Promise<RunOutcome>>();
