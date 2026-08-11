@@ -124,13 +124,19 @@ function createThreadResult(
     items?: unknown[];
     status?: 'completed' | 'failed' | 'inProgress' | 'interrupted';
   }> = [],
+  options: {
+    ephemeral?: boolean;
+    path?: string | null;
+  } = {},
 ) {
   return {
     thread: {
       id: threadId,
-      path: `/tmp/sessions/${threadId}.jsonl`,
+      path: options.path === undefined
+        ? `/tmp/sessions/${threadId}.jsonl`
+        : options.path,
       preview: '',
-      ephemeral: false,
+      ephemeral: options.ephemeral ?? false,
       status: { type: 'idle' },
       turns: turns.map(turn => ({
         ...turn,
@@ -2206,10 +2212,10 @@ describe('CodexExecutionBackend', () => {
           };
         }
         if (method === 'thread/start') {
-          const result = createThreadResult('thread-ephemeral');
-          result.thread.ephemeral = true;
-          result.thread.path = null;
-          return result;
+          return createThreadResult('thread-ephemeral', [], {
+            ephemeral: true,
+            path: null,
+          });
         }
         if (method === 'turn/start') {
           queueMicrotask(() => completeTurn('thread-ephemeral', 'turn-ephemeral'));
@@ -2253,7 +2259,7 @@ describe('CodexExecutionBackend', () => {
         call => call[0] === 'thread/start',
       )?.[1];
       expect(startParams.dynamicTools).toBeUndefined();
-      expect(session.getSnapshot().sessionFilePath).toBeUndefined();
+      expect(session.getSnapshot()).not.toHaveProperty('sessionFilePath');
 
       await session.dispose();
     },
