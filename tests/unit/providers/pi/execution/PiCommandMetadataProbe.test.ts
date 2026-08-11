@@ -13,6 +13,33 @@ class Deferred<T> {
 }
 
 describe('PiCommandMetadataProbe', () => {
+  it('loads commands through the supported Pi discovery command', async () => {
+    const kernel = {
+      request: jest.fn(async () => ({
+        commands: [{ name: 'compact', source: 'runtime' }],
+      })),
+      shutdown: jest.fn(async () => undefined),
+      start: jest.fn(),
+    };
+    const host = {
+      getResolvedProviderCliPath: jest.fn(async () => '/configured/pi'),
+      settings: {},
+    } as unknown as ProviderHost;
+    const probe = new PiCommandMetadataProbe(host, () => kernel as any);
+
+    await expect(probe.load('/vault')).resolves.toEqual([
+      expect.objectContaining({ name: 'compact' }),
+    ]);
+    expect(kernel.request).toHaveBeenCalledWith(
+      'get_commands',
+      {},
+      10_000,
+      expect.any(AbortSignal),
+    );
+
+    await probe.dispose();
+  });
+
   it('registers a load before a synchronously started transition quiesces', async () => {
     const cliResolution = new Deferred<string | null>();
     const kernel = {

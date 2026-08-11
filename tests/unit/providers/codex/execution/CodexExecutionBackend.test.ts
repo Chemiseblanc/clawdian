@@ -2205,7 +2205,12 @@ describe('CodexExecutionBackend', () => {
             platformOs: 'macos',
           };
         }
-        if (method === 'thread/start') return createThreadResult('thread-ephemeral');
+        if (method === 'thread/start') {
+          const result = createThreadResult('thread-ephemeral');
+          result.thread.ephemeral = true;
+          result.thread.path = null;
+          return result;
+        }
         if (method === 'turn/start') {
           queueMicrotask(() => completeTurn('thread-ephemeral', 'turn-ephemeral'));
           return createTurnResult('turn-ephemeral');
@@ -2248,6 +2253,7 @@ describe('CodexExecutionBackend', () => {
         call => call[0] === 'thread/start',
       )?.[1];
       expect(startParams.dynamicTools).toBeUndefined();
+      expect(session.getSnapshot().sessionFilePath).toBeUndefined();
 
       await session.dispose();
     },
