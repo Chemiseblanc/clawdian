@@ -59,6 +59,8 @@ export interface PeriodicJobsPort {
 
 export interface OneOffJobsPort {
   list(): readonly OneOffJob[];
+  interrupt(id: string): Promise<void>;
+  retry(id: string): Promise<OneOffJob>;
   delete(id: string): Promise<void>;
   subscribe(listener: () => void): () => void;
 }

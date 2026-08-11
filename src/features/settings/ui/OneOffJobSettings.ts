@@ -1,3 +1,5 @@
+import { Notice } from 'obsidian';
+
 import { t } from '../../../i18n/i18n';
 import { confirmDelete } from '../../../shared/modals/ConfirmModal';
 import type { FeatureHost } from '../../FeatureHost';
@@ -68,6 +70,25 @@ export class OneOffJobSettings {
       }
 
       const actions = item.createDiv({ cls: 'claudian-sp-item-actions' });
+      if (job.status === 'running') {
+        const interruptButton = actions.createEl('button', {
+          cls: 'claudian-settings-action-btn claudian-one-off-job-interrupt',
+          text: t('settings.jobs.oneOff.interrupt'),
+        });
+        interruptButton.addEventListener('click', () => {
+          void this.interruptJob(job.id);
+        });
+        continue;
+      }
+      if (job.status === 'interrupted') {
+        const retryButton = actions.createEl('button', {
+          cls: 'claudian-settings-action-btn claudian-one-off-job-retry',
+          text: t('settings.jobs.oneOff.retry'),
+        });
+        retryButton.addEventListener('click', () => {
+          void this.retryJob(job.id);
+        });
+      }
       const deleteButton = actions.createEl('button', {
         cls: 'claudian-settings-action-btn claudian-one-off-job-delete',
         text: t('settings.jobs.oneOff.delete'),
@@ -75,6 +96,26 @@ export class OneOffJobSettings {
       deleteButton.addEventListener('click', () => {
         void this.deleteJob(job.id, job.name);
       });
+    }
+  }
+
+  private async interruptJob(id: string): Promise<void> {
+    try {
+      await this.plugin.oneOffJobs.interrupt(id);
+    } catch (error) {
+      const message = error instanceof Error
+        ? error.message
+        : t('settings.jobs.oneOff.interruptFailed');
+      new Notice(t('settings.jobs.oneOff.interruptFailedWithMessage', { message }));
+    }
+  }
+
+  private async retryJob(id: string): Promise<void> {
+    try {
+      await this.plugin.oneOffJobs.retry(id);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : t('settings.jobs.oneOff.retryFailed');
+      new Notice(t('settings.jobs.oneOff.retryFailedWithMessage', { message }));
     }
   }
 

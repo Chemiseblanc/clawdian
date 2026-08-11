@@ -144,6 +144,84 @@ describe('OneOffJobsService', () => {
     expect(harness.createExecutionService).not.toHaveBeenCalled();
   });
 
+  it('retries an interrupted job in place with a fresh execution', async () => {
+    const interrupted = storedJob({
+      completedAt: 300,
+      status: 'interrupted',
+      summary: 'Obsidian closed before the job completed.',
+    });
+    const harness = createHarness({ jobs: [interrupted] });
+    harness.setNow(400);
+
+    await expect(harness.service.retry(interrupted.id)).resolves.toEqual({
+      ...interrupted,
+      startedAt: 400,
+      completedAt: undefined,
+      status: 'running',
+      summary: '',
+    });
+
+    await waitFor(() => harness.settings.oneOffJobs[0].status === 'succeeded');
+    expect(harness.initializeProvider).toHaveBeenCalledWith('claude');
+    expect(harness.runner.execute).toHaveBeenCalledWith({
+      model: 'sonnet',
+      permissionMode: 'yolo',
+      prompt: 'Research the vault',
+    });
+    expect(harness.settings.oneOffJobs).toEqual([{
+      ...interrupted,
+      startedAt: 400,
+      completedAt: 400,
+      status: 'succeeded',
+      summary: 'completed',
+    }]);
+  });
+
+  it('rejects retrying a one-off job that was not interrupted', async () => {
+    const harness = createHarness({ jobs: [storedJob({ status: 'failed' })] });
+
+    await expect(harness.service.retry('one-off-job-1'))
+      .rejects.toThrow('Only interrupted one-off jobs can be retried.');
+    expect(harness.createExecutionService).not.toHaveBeenCalled();
+  });
+
+  it('interrupts a running job without deleting its durable record', async () => {
+    const completion = promiseConstructor.withResolvers<string>();
+    const runner = new FakeRunner();
+    runner.execute.mockReturnValueOnce(completion.promise);
+    const harness = createHarness({ runner });
+    const job = await harness.service.start({
+      name: 'Interrupt me',
+      prompt: 'Wait',
+      model: { providerId: 'claude', model: 'sonnet' },
+    });
+    await waitFor(() => runner.execute.mock.calls.length === 1);
+    harness.setNow(250);
+
+    await harness.service.interrupt(job.id);
+
+    expect(runner.cancel).toHaveBeenCalled();
+    expect(runner.dispose).toHaveBeenCalled();
+    expect(harness.settings.oneOffJobs).toEqual([{
+      ...job,
+      completedAt: 250,
+      status: 'interrupted',
+      summary: 'Interrupted by user.',
+    }]);
+
+    completion.resolve('late success');
+    await waitFor(() => runner.dispose.mock.calls.length > 1);
+    expect(harness.settings.oneOffJobs[0].status).toBe('interrupted');
+  });
+
+  it('rejects interrupting a one-off job that is no longer running', async () => {
+    const harness = createHarness({ jobs: [storedJob({ status: 'succeeded' })] });
+
+    await expect(harness.service.interrupt('one-off-job-1'))
+      .rejects.toThrow('Only running one-off jobs can be interrupted.');
+    expect(harness.runner.cancel).not.toHaveBeenCalled();
+  });
+
   it('cancels a running job before deleting its durable record', async () => {
     const completion = promiseConstructor.withResolvers<string>();
     const runner = new FakeRunner();

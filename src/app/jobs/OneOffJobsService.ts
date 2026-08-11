@@ -25,6 +25,9 @@ interface ActiveRun {
 const JOB_NOT_FOUND_MESSAGE = 'One-off job not found.';
 const CLOSED_DURING_RUN_MESSAGE = 'Obsidian closed before the job completed.';
 const EMPTY_SUCCESS_MESSAGE = 'Completed without a text response.';
+const INTERRUPTED_BY_USER_MESSAGE = 'Interrupted by user.';
+const INTERRUPT_NOT_RUNNING_MESSAGE = 'Only running one-off jobs can be interrupted.';
+const RETRY_NOT_INTERRUPTED_MESSAGE = 'Only interrupted one-off jobs can be retried.';
 
 export class OneOffJobsService {
   private readonly activeRuns = new Map<string, ActiveRun>();
@@ -71,6 +74,56 @@ export class OneOffJobsService {
     });
 
     if (!committed || !active) throw new Error('One-off job was not started.');
+    const run = this.execute(structuredClone(committed), active);
+    this.pendingRuns.add(run);
+    void run.finally(() => this.pendingRuns.delete(run)).catch(() => undefined);
+    return structuredClone(committed);
+  }
+
+  async interrupt(id: string): Promise<void> {
+    const completedAt = this.dependencies.clock.now();
+    await this.settingsCoordinator.mutate((settings) => {
+      const job = settings.oneOffJobs.find(candidate => candidate.id === id);
+      if (!job) throw new Error(JOB_NOT_FOUND_MESSAGE);
+      if (job.status !== 'running') {
+        throw new Error(INTERRUPT_NOT_RUNNING_MESSAGE);
+      }
+      job.completedAt = completedAt;
+      job.status = 'interrupted';
+      job.summary = INTERRUPTED_BY_USER_MESSAGE;
+    }, () => this.invalidateRun(id));
+  }
+
+  async retry(id: string): Promise<OneOffJob> {
+    if (this.stopped) throw new Error('One-off jobs are unavailable during shutdown.');
+
+    let committed: OneOffJob | null = null;
+    let active: ActiveRun | null = null;
+    await this.settingsCoordinator.mutate((settings) => {
+      const index = settings.oneOffJobs.findIndex(job => job.id === id);
+      if (index < 0) throw new Error(JOB_NOT_FOUND_MESSAGE);
+      const existing = settings.oneOffJobs[index];
+      if (existing.status !== 'interrupted') {
+        throw new Error(RETRY_NOT_INTERRUPTED_MESSAGE);
+      }
+      const { completedAt: _completedAt, ...retrying } = existing;
+      committed = {
+        ...retrying,
+        startedAt: this.dependencies.clock.now(),
+        status: 'running',
+        summary: '',
+      };
+      settings.oneOffJobs = settings.oneOffJobs.map((job, jobIndex) => (
+        jobIndex === index ? committed! : job
+      ));
+    }, () => {
+      if (!committed) return;
+      active = { runner: null, suppressed: false };
+      this.activeRuns.set(committed.id, active);
+      this.notify();
+    });
+
+    if (!committed || !active) throw new Error('One-off job was not retried.');
     const run = this.execute(structuredClone(committed), active);
     this.pendingRuns.add(run);
     void run.finally(() => this.pendingRuns.delete(run)).catch(() => undefined);

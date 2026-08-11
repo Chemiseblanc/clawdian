@@ -119,6 +119,12 @@
         "description": "Independent jobs started by agents appear here.",
         "empty": "No one-off jobs have been started.",
         "started": "Started {date}",
+        "interrupt": "Interrupt job",
+        "interruptFailed": "Failed to interrupt one-off job.",
+        "interruptFailedWithMessage": "Failed to interrupt one-off job: {message}",
+        "retry": "Retry job",
+        "retryFailed": "Failed to retry one-off job.",
+        "retryFailedWithMessage": "Failed to retry one-off job: {message}",
         "delete": "Delete job",
         "deleteConfirm": "Delete one-off job \"{name}\"?"
       }

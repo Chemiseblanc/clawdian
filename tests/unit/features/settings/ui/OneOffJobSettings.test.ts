@@ -29,6 +29,32 @@ function createRenderer(initialJobs: OneOffJob[] = []) {
   const listeners = new Set<() => void>();
   const port: OneOffJobsPort = {
     list: jest.fn(() => JSON.parse(JSON.stringify(jobs)) as OneOffJob[]),
+    interrupt: jest.fn(async (id: string) => {
+      jobs = jobs.map(candidate => candidate.id === id
+        ? {
+            ...candidate,
+            completedAt: Date.now(),
+            status: 'interrupted',
+            summary: 'Interrupted by user.',
+          }
+        : candidate);
+      for (const listener of listeners) listener();
+    }),
+    retry: jest.fn(async (id: string) => {
+      jobs = jobs.map(candidate => candidate.id === id
+        ? {
+            ...candidate,
+            startedAt: Date.now(),
+            completedAt: undefined,
+            status: 'running',
+            summary: '',
+          }
+        : candidate);
+      for (const listener of listeners) listener();
+      return JSON.parse(JSON.stringify(
+        jobs.find(candidate => candidate.id === id),
+      )) as OneOffJob;
+    }),
     delete: jest.fn(async (id: string) => {
       jobs = jobs.filter(candidate => candidate.id !== id);
       for (const listener of listeners) listener();
@@ -80,6 +106,47 @@ describe('OneOffJobSettings', () => {
     expect(populated.container.textContent).toContain('Running');
     expect(populated.container.textContent).toContain('Finished job');
     expect(populated.container.textContent).toContain('Research complete');
+  });
+
+  it('offers retry only for interrupted jobs', async () => {
+    const { container, port } = createRenderer([
+      job({
+        status: 'interrupted',
+        summary: 'Obsidian closed before the job completed.',
+      }),
+      job({ id: 'one-off-job-2', status: 'failed' }),
+    ]);
+
+    const retryButtons = container.querySelectorAll('.claudian-one-off-job-retry');
+    expect(retryButtons).toHaveLength(1);
+    expect(retryButtons[0].textContent).toBe('Retry job');
+
+    (retryButtons[0] as HTMLButtonElement).click();
+    await flushActions();
+
+    expect(port.retry).toHaveBeenCalledWith('one-off-job-1');
+    expect(container.textContent).toContain('Running');
+  });
+
+  it('replaces delete with interrupt while a job is running', async () => {
+    const { container, port } = createRenderer([
+      job({ status: 'running', completedAt: undefined, summary: '' }),
+    ]);
+
+    const interruptButton = container.querySelector(
+      '.claudian-one-off-job-interrupt',
+    ) as HTMLButtonElement;
+    expect(interruptButton.textContent).toBe('Interrupt job');
+    expect(container.querySelector('.claudian-one-off-job-delete')).toBeNull();
+
+    interruptButton.click();
+    await flushActions();
+
+    expect(port.interrupt).toHaveBeenCalledWith('one-off-job-1');
+    expect(container.textContent).toContain('Interrupted');
+    expect(container.querySelector('.claudian-one-off-job-retry')).not.toBeNull();
+    expect(container.querySelector('.claudian-one-off-job-delete')).not.toBeNull();
+    expect(container.querySelector('.claudian-one-off-job-interrupt')).toBeNull();
   });
 
   it('deletes a selected job and releases its subscription on disposal', async () => {

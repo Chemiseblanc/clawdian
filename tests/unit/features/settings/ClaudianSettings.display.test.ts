@@ -126,6 +126,8 @@ function createTab(enableDualPane: boolean, enableFilePane = true): {
     },
     oneOffJobs: {
       list: jest.fn(() => []),
+      interrupt: jest.fn(),
+      retry: jest.fn(),
       delete: jest.fn(),
       subscribe: jest.fn(() => jest.fn()),
     },

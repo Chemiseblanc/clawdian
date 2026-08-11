@@ -149,6 +149,8 @@
   -webkit-line-clamp: 2;
 }
 
+.claudian-one-off-job-interrupt,
+.claudian-one-off-job-retry,
 .claudian-one-off-job-delete {
   width: auto;
   min-width: max-content;
