@@ -250,7 +250,7 @@ function createHarness(
   const host = createHost();
   const kernels: FakeKernel[] = [];
   const responses = new Map<string, unknown>([
-    ['get_commands', {
+    ['get_available_commands', {
       commands: [{ description: 'Compact context', name: 'compact', source: 'runtime' }],
     }],
     ['get_session_stats', {
@@ -302,7 +302,7 @@ function createHarness(
 describe('OmpExecutionBackend', () => {
   it('uses an isolated no-session kernel for command metadata probes', async () => {
     const responses = new Map<string, unknown>([
-      ['get_commands', {
+      ['get_available_commands', {
         commands: [
           { name: 'skill-one', source: 'skill' },
           { name: 'skill-one', source: 'skill' },
@@ -413,7 +413,7 @@ describe('OmpExecutionBackend', () => {
       const kernel = new FakeKernel(
         spec,
         callbacks,
-        new Map([['get_commands', {
+        new Map([['get_available_commands', {
           commands: [{ name: `from-${spec.command}`, source: 'runtime' }],
         }]]),
       );
@@ -1003,7 +1003,7 @@ describe('OmpExecutionBackend', () => {
         throw new Error(`${failureType} failed`);
       }
       const responses: Record<string, unknown> = {
-        get_commands: { commands: [] },
+        get_available_commands: { commands: [] },
         get_session_stats: {},
         get_state: {},
         prompt: { accepted: true },
