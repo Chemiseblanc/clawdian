@@ -1,7 +1,7 @@
 {
   "id": "clawdian",
   "name": "Clawdian",
-  "version": "2.2.1",
+  "version": "2.3.0",
   "minAppVersion": "1.7.2",
   "description": "Embeds Claude Code, Codex, and other coding agents as AI collaborators in your vault. Your vault becomes their working directory, giving them capabilities for file reads and writes, search, bash commands, and multi-step workflows.",
   "author": "Matthew Gibson",
