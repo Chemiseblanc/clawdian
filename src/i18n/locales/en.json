@@ -113,6 +113,14 @@
         "succeeded": "Succeeded",
         "failed": "Failed",
         "interrupted": "Interrupted"
+      },
+      "oneOff": {
+        "title": "One-off jobs",
+        "description": "Independent jobs started by agents appear here.",
+        "empty": "No one-off jobs have been started.",
+        "started": "Started {date}",
+        "delete": "Delete job",
+        "deleteConfirm": "Delete one-off job \"{name}\"?"
       }
     },
     "display": "Display",

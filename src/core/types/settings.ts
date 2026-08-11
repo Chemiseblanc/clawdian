@@ -141,6 +141,25 @@ export interface PeriodicJobDraft {
   model: StoredChatModelSelection;
 }
 
+export type OneOffJobStatus = PeriodicJobRunStatus;
+
+export interface OneOffJob {
+  id: string;
+  name: string;
+  prompt: string;
+  model: StoredChatModelSelection;
+  startedAt: number;
+  completedAt?: number;
+  status: OneOffJobStatus;
+  summary: string;
+}
+
+export interface OneOffJobDraft {
+  name: string;
+  prompt: string;
+  model: StoredChatModelSelection;
+}
+
 /**
  * Application settings stored in .claudian/claudian-settings.json.
  *
@@ -176,6 +195,7 @@ export interface ClaudianSettings {
   customContextLimits: Record<string, number>;
   customModelAliases: Record<string, string>;
   periodicJobs: PeriodicJob[];
+  oneOffJobs: OneOffJob[];
 
   // UI settings
   keyboardNavigation: KeyboardNavigationSettings;

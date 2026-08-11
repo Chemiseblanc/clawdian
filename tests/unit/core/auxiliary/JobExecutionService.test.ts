@@ -1,4 +1,4 @@
-import { PeriodicJobExecutionService } from '@/core/auxiliary/PeriodicJobExecutionService';
+import { JobExecutionService } from '@/core/auxiliary/JobExecutionService';
 import { ProviderExecutionLifecycleRegistry } from '@/core/execution';
 
 import {
@@ -9,7 +9,7 @@ import {
 function createService() {
   const backend = new FakeAuxiliaryBackend();
   const lifecycleRegistry = new ProviderExecutionLifecycleRegistry();
-  const service = new PeriodicJobExecutionService({
+  const service = new JobExecutionService({
     backend,
     interactionPort: {
       askUserQuestion: jest.fn(),
@@ -29,7 +29,7 @@ const request = {
   prompt: 'Run the periodic job',
 };
 
-describe('PeriodicJobExecutionService', () => {
+describe('JobExecutionService', () => {
   it('uses the exact unattended request envelope and releases its ephemeral lease', async () => {
     const { backend, service } = createService();
 
@@ -42,7 +42,7 @@ describe('PeriodicJobExecutionService', () => {
 
     await expect(execution).resolves.toBe('first second');
     expect(backend.configs).toEqual([expect.objectContaining({
-      hostToolAccess: 'disabled',
+      hostToolAccess: 'enabled',
       lifecycle: 'ephemeral',
       nativePersistence: 'disabled-if-supported',
       vaultWorkingDirectory: '/vault',

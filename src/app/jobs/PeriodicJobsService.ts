@@ -1,4 +1,4 @@
-import type { PeriodicJobExecutionService } from '../../core/auxiliary/PeriodicJobExecutionService';
+import type { JobExecutionService } from '../../core/auxiliary/JobExecutionService';
 import { findProviderModelOption } from '../../core/providers/conversationModel';
 import type { ProviderHost } from '../../core/providers/ProviderHost';
 import { ProviderRegistry } from '../../core/providers/ProviderRegistry';
@@ -24,12 +24,12 @@ export interface PeriodicJobsDependencies {
   ): { stop(): void };
   findPreviousScheduledRun(pattern: string, before: number): number | null;
   initializeProvider(providerId: ProviderId): Promise<void>;
-  createExecutionService(providerId: ProviderId): PeriodicJobExecutionService;
+  createExecutionService(providerId: ProviderId): JobExecutionService;
 }
 
 interface ActiveRun {
   readonly runId: string;
-  runner: PeriodicJobExecutionService | null;
+  runner: JobExecutionService | null;
   suppressed: boolean;
 }
 

@@ -1,13 +1,13 @@
 import type { AuxiliaryExecutionContext } from './AuxiliaryExecutionContext';
 import { AuxiliarySessionController } from './AuxiliarySessionController';
 
-export interface PeriodicJobExecutionRequest {
+export interface JobExecutionRequest {
   model: string;
   permissionMode: string;
   prompt: string;
 }
 
-export class PeriodicJobExecutionService {
+export class JobExecutionService {
   private readonly controller: AuxiliarySessionController;
 
   constructor(context: AuxiliaryExecutionContext) {
@@ -18,7 +18,7 @@ export class PeriodicJobExecutionService {
     );
   }
 
-  async execute(request: PeriodicJobExecutionRequest): Promise<string> {
+  async execute(request: JobExecutionRequest): Promise<string> {
     try {
       await this.controller.startRoot();
       return await this.controller.execute({

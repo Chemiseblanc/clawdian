@@ -107,6 +107,7 @@ describe('types.ts', () => {
         customContextLimits: {},
         customModelAliases: {},
         periodicJobs: [],
+        oneOffJobs: [],
         systemPrompt: '',
 
         persistentExternalContextPaths: [],
@@ -166,6 +167,7 @@ describe('types.ts', () => {
         customContextLimits: {},
         customModelAliases: {},
         periodicJobs: [],
+        oneOffJobs: [],
         systemPrompt: '',
 
         persistentExternalContextPaths: [],
@@ -226,6 +228,7 @@ describe('types.ts', () => {
         customContextLimits: {},
         customModelAliases: {},
         periodicJobs: [],
+        oneOffJobs: [],
         systemPrompt: '',
 
         persistentExternalContextPaths: [],

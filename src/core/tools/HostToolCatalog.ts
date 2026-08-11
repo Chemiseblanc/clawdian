@@ -1,5 +1,10 @@
 import type { ProviderId } from '../types/provider';
-import type { PeriodicJob, PeriodicJobDraft } from '../types/settings';
+import type {
+  OneOffJob,
+  OneOffJobDraft,
+  PeriodicJob,
+  PeriodicJobDraft,
+} from '../types/settings';
 
 export type HostToolEffect = 'read' | 'write' | 'destructive';
 
@@ -54,4 +59,9 @@ export interface PeriodicJobsHostPort {
   updatePartial(id: string, patch: PeriodicJobPartialUpdate): Promise<PeriodicJob>;
   delete(id: string): Promise<void>;
   isRunning(id: string): boolean;
+}
+
+/** Application-owned one-off job operations available to the host-tool catalog. */
+export interface OneOffJobsHostPort {
+  start(draft: OneOffJobDraft): Promise<OneOffJob>;
 }

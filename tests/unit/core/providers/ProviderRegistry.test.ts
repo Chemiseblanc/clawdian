@@ -495,7 +495,7 @@ describe('ProviderRegistry', () => {
       app: { vault: { adapter: { basePath: '/vault' } } },
       executionLifecycleRegistry: new ProviderExecutionLifecycleRegistry(),
     } as unknown as ProviderHost;
-    const service = ProviderRegistry.createPeriodicJobExecutionService(host, 'claude');
+    const service = ProviderRegistry.createJobExecutionService(host, 'claude');
 
     const execution = service.execute({
       model: 'job-model',

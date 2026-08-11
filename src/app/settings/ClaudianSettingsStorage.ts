@@ -24,6 +24,7 @@ import {
   type EnvironmentScope,
   type EnvSnippet,
   type HiddenProviderCommands,
+  type OneOffJob,
   type PeriodicJob,
   type PeriodicJobLastRun,
   type ProviderConfigMap,
@@ -443,6 +444,66 @@ function normalizePeriodicJobs(value: unknown): PeriodicJob[] {
   return jobs;
 }
 
+function normalizeOneOffJobs(value: unknown): OneOffJob[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const jobs: OneOffJob[] = [];
+  const ids = new Set<string>();
+  for (const item of value) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
+    const candidate = item as Record<string, unknown>;
+    const id = trimStoredString(candidate.id);
+    const name = trimStoredString(candidate.name);
+    const prompt = trimStoredString(candidate.prompt);
+    const model = normalizeStoredChatModelSelection(candidate.model);
+    const status = typeof candidate.status === 'string' ? candidate.status : '';
+    const startedAt = candidate.startedAt;
+    if (
+      !id
+      || ids.has(id)
+      || !name
+      || !prompt
+      || !model
+      || typeof startedAt !== 'number'
+      || !Number.isFinite(startedAt)
+      || startedAt <= 0
+      || typeof candidate.summary !== 'string'
+      || !['running', 'succeeded', 'failed', 'interrupted'].includes(status)
+    ) {
+      continue;
+    }
+
+    const job: OneOffJob = {
+      id,
+      name,
+      prompt,
+      model,
+      startedAt,
+      status: status as OneOffJob['status'],
+      summary: capPeriodicJobSummary(candidate.summary),
+    };
+    if (status === 'running') {
+      if ('completedAt' in candidate) continue;
+    } else {
+      const completedAt = candidate.completedAt;
+      if (
+        typeof completedAt !== 'number'
+        || !Number.isFinite(completedAt)
+        || completedAt <= 0
+        || completedAt < startedAt
+      ) {
+        continue;
+      }
+      job.completedAt = completedAt;
+    }
+    ids.add(id);
+    jobs.push(job);
+  }
+  return jobs;
+}
+
 function migrateLegacyChatModelSelection(
   stored: Record<string, unknown>,
 ): StoredChatModelSelection | null {
@@ -493,6 +554,7 @@ export class ClaudianSettingsStorage {
     const envSnippets = normalizeEnvSnippets(stored.envSnippets);
     const customModelAliases = normalizeModelAliases(stored.customModelAliases);
     const periodicJobs = normalizePeriodicJobs(stored.periodicJobs);
+    const oneOffJobs = normalizeOneOffJobs(stored.oneOffJobs);
     const {
       changed: didStripRuntimeProviderConfig,
       providerConfigs,
@@ -519,6 +581,7 @@ export class ClaudianSettingsStorage {
       envSnippets,
       customModelAliases,
       periodicJobs,
+      oneOffJobs,
       hiddenProviderCommands,
       providerConfigs,
       chatViewPlacement,
@@ -566,6 +629,7 @@ export class ClaudianSettingsStorage {
       )
       || JSON.stringify(envSnippets) !== JSON.stringify(stored.envSnippets ?? [])
       || JSON.stringify(periodicJobs) !== JSON.stringify(stored.periodicJobs ?? [])
+      || JSON.stringify(oneOffJobs) !== JSON.stringify(stored.oneOffJobs ?? [])
       || (
         'customModelAliases' in stored
         && JSON.stringify(customModelAliases) !== JSON.stringify(stored.customModelAliases ?? {})

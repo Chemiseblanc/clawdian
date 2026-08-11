@@ -12,7 +12,8 @@ import type { Editor, TAbstractFile, WorkspaceLeaf } from 'obsidian';
 import { MarkdownView, Notice, Plugin, TFolder } from 'obsidian';
 
 import { ConversationRepository } from './app/conversations/ConversationRepository';
-import { PeriodicJobHostToolCatalog } from './app/jobs/PeriodicJobHostToolCatalog';
+import { JobHostToolCatalog } from './app/jobs/JobHostToolCatalog';
+import { OneOffJobsService } from './app/jobs/OneOffJobsService';
 import { PeriodicJobsService } from './app/jobs/PeriodicJobsService';
 import { ClaudianProviderHost } from './app/providers/ClaudianProviderHost';
 import { ChatModelSelectionCoordinator } from './app/settings/ChatModelSelectionCoordinator';
@@ -135,6 +136,7 @@ export default class ClaudianPlugin extends Plugin {
     () => this.settings?.maxWarmAgentProcesses ?? DEFAULT_MAX_WARM_AGENT_PROCESSES,
   );
   private periodicJobsService: PeriodicJobsService | null = null;
+  private oneOffJobsService: OneOffJobsService | null = null;
   private hostToolCatalogValue: HostToolCatalog | null = null;
   private settingsCoordinator!: SettingsCoordinator<ClaudianSettings>;
   private chatModelSelectionCoordinator!: ChatModelSelectionCoordinator;
@@ -166,6 +168,13 @@ export default class ClaudianPlugin extends Plugin {
       throw new Error('Periodic jobs are unavailable before settings load.');
     }
     return this.periodicJobsService;
+  }
+
+  get oneOffJobs(): OneOffJobsService {
+    if (!this.oneOffJobsService) {
+      throw new Error('One-off jobs are unavailable before settings load.');
+    }
+    return this.oneOffJobsService;
   }
 
   get hostTools(): HostToolCatalog {
@@ -348,11 +357,12 @@ export default class ClaudianPlugin extends Plugin {
       this.getAllViews().map(view => view.prepareForPluginUnload()),
     );
     try {
-      if (this.periodicJobsService) {
-        await this.periodicJobsService.stop();
-      }
+      await Promise.all([
+        this.periodicJobsService?.stop(),
+        this.oneOffJobsService?.stop(),
+      ]);
     } catch {
-      // Continue releasing execution resources if scheduled job cleanup fails.
+      // Continue releasing execution resources if job cleanup fails.
     }
     try {
       await this.executionLifecycleRegistry.dispose();
@@ -492,11 +502,29 @@ export default class ClaudianPlugin extends Plugin {
           'periodic-job',
         ),
         createExecutionService: providerId => (
-          ProviderRegistry.createPeriodicJobExecutionService(this.providerHost, providerId)
+          ProviderRegistry.createJobExecutionService(this.providerHost, providerId)
         ),
       },
     );
-    this.hostToolCatalogValue = new PeriodicJobHostToolCatalog(this.periodicJobsService);
+    this.oneOffJobsService = new OneOffJobsService(
+      this.settingsCoordinator,
+      () => this.settings,
+      {
+        clock: { now: () => Date.now() },
+        initializeProvider: providerId => ProviderWorkspaceRegistry.ensureInitialized(
+          this.providerHost,
+          providerId,
+          'periodic-job',
+        ),
+        createExecutionService: providerId => (
+          ProviderRegistry.createJobExecutionService(this.providerHost, providerId)
+        ),
+      },
+    );
+    this.hostToolCatalogValue = new JobHostToolCatalog(
+      this.periodicJobsService,
+      this.oneOffJobsService,
+    );
     this.chatModelSelectionCoordinator = new ChatModelSelectionCoordinator(
       this.settingsCoordinator,
     );
@@ -532,6 +560,7 @@ export default class ClaudianPlugin extends Plugin {
     );
     const didNormalizeModelVariants = this.normalizeModelVariantSettings();
     await this.periodicJobs.reconcileInterruptedRuns();
+    await this.oneOffJobs.reconcileInterruptedRuns();
 
     const deferRemainingMetadata = options.deferNonRestoredSessionMetadata === true;
     const initialMetadataScan = await StartupProfiler.runAsync(

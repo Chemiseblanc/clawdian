@@ -3,7 +3,7 @@ import '@/providers';
 import { PeriodicJobsService } from '@/app/jobs/PeriodicJobsService';
 import { DEFAULT_CLAUDIAN_SETTINGS } from '@/app/settings/defaultSettings';
 import { SettingsCoordinator } from '@/app/settings/SettingsCoordinator';
-import type { PeriodicJobExecutionService } from '@/core/auxiliary/PeriodicJobExecutionService';
+import type { JobExecutionService } from '@/core/auxiliary/JobExecutionService';
 import type { ProviderHost } from '@/core/providers/ProviderHost';
 import type { PeriodicJob, PeriodicJobDraft } from '@/core/types';
 
@@ -83,7 +83,7 @@ function createHarness(options: {
     options.findPreviousScheduledRun ?? (() => null),
   );
   const createExecutionService = jest.fn(() => (
-    runner as unknown as PeriodicJobExecutionService
+    runner as unknown as JobExecutionService
   ));
   const coordinator = new SettingsCoordinator(settings, persist);
   const service = new PeriodicJobsService(

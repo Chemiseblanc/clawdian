@@ -1,7 +1,7 @@
 import { getVaultPath } from '../../utils/path';
 import { InlineEditService as SharedInlineEditService } from '../auxiliary/InlineEditService';
 import { InstructionRefineService as SharedInstructionRefineService } from '../auxiliary/InstructionRefineService';
-import { PeriodicJobExecutionService } from '../auxiliary/PeriodicJobExecutionService';
+import { JobExecutionService } from '../auxiliary/JobExecutionService';
 import { TitleGenerationService as SharedTitleGenerationService } from '../auxiliary/TitleGenerationService';
 import type {
   ProviderExecutionBackend,
@@ -113,11 +113,11 @@ export class ProviderRegistry {
     );
   }
 
-  static createPeriodicJobExecutionService(
+  static createJobExecutionService(
     plugin: ProviderHost,
     providerId: ProviderId,
-  ): PeriodicJobExecutionService {
-    return new PeriodicJobExecutionService(
+  ): JobExecutionService {
+    return new JobExecutionService(
       this.createAuxiliaryExecutionContext(plugin, providerId),
     );
   }

@@ -1,6 +1,14 @@
-import { PeriodicJobHostToolCatalog } from '@/app/jobs/PeriodicJobHostToolCatalog';
-import type { PeriodicJobsHostPort } from '@/core/tools/HostToolCatalog';
-import type { PeriodicJob, PeriodicJobDraft } from '@/core/types';
+import { JobHostToolCatalog } from '@/app/jobs/JobHostToolCatalog';
+import type {
+  OneOffJobsHostPort,
+  PeriodicJobsHostPort,
+} from '@/core/tools/HostToolCatalog';
+import type {
+  OneOffJob,
+  OneOffJobDraft,
+  PeriodicJob,
+  PeriodicJobDraft,
+} from '@/core/types';
 
 const context = { providerId: 'omp' as const, model: 'omp:openai/gpt-5.6' };
 
@@ -14,6 +22,16 @@ function job(overrides: Partial<PeriodicJob> = {}): PeriodicJob {
     model: { providerId: 'omp', model: 'omp:openai/gpt-5.6' },
     lastRun: null,
     ...overrides,
+  };
+}
+
+function oneOffJob(draft: OneOffJobDraft): OneOffJob {
+  return {
+    id: 'one-off-job-created',
+    ...structuredClone(draft),
+    startedAt: 100,
+    status: 'running',
+    summary: '',
   };
 }
 
@@ -35,10 +53,13 @@ function createHarness() {
     delete: jest.fn(async (_id: string) => undefined),
     isRunning: jest.fn(id => id === 'job-1'),
   };
-  return { catalog: new PeriodicJobHostToolCatalog(port), port };
+  const oneOffPort: jest.Mocked<OneOffJobsHostPort> = {
+    start: jest.fn(async draft => oneOffJob(draft)),
+  };
+  return { catalog: new JobHostToolCatalog(port, oneOffPort), oneOffPort, port };
 }
 
-describe('PeriodicJobHostToolCatalog', () => {
+describe('JobHostToolCatalog', () => {
   it('lists cloned jobs with transient running state', async () => {
     const { catalog, port } = createHarness();
 
@@ -85,6 +106,25 @@ describe('PeriodicJobHostToolCatalog', () => {
     expect(port.create).toHaveBeenCalledWith(expect.objectContaining({
       model: { providerId: 'claude', model: 'sonnet' },
     }));
+  });
+
+  it('starts an independent one-off job with the invoking agent model by default', async () => {
+    const { catalog, oneOffPort } = createHarness();
+
+    const result = await catalog.invoke('claudian.one_off_job.start', {
+      name: 'Background research',
+      prompt: 'Research this independently',
+    }, context);
+
+    expect(oneOffPort.start).toHaveBeenCalledWith({
+      name: 'Background research',
+      prompt: 'Research this independently',
+      model: { providerId: 'omp', model: 'omp:openai/gpt-5.6' },
+    });
+    expect(result).toEqual({
+      ok: true,
+      value: { job: expect.objectContaining({ id: 'one-off-job-created', status: 'running' }) },
+    });
   });
 
   it('passes only supplied update fields to the atomic application operation', async () => {
@@ -153,7 +193,7 @@ describe('PeriodicJobHostToolCatalog', () => {
     await expect(catalog.invoke('claudian.periodic_job.delete', { id: 'job-1' }, context))
       .resolves.toEqual({
         ok: false,
-        error: { code: 'internal_error', message: 'Periodic job operation failed.' },
+        error: { code: 'internal_error', message: 'Job operation failed.' },
       });
   });
 });

@@ -7,6 +7,7 @@ import type {
   ClaudianSettings,
   Conversation,
   ConversationMeta,
+  OneOffJob,
   PeriodicJob,
   PeriodicJobDraft,
   StoredChatModelSelection,
@@ -56,6 +57,12 @@ export interface PeriodicJobsPort {
   subscribe(listener: () => void): () => void;
 }
 
+export interface OneOffJobsPort {
+  list(): readonly OneOffJob[];
+  delete(id: string): Promise<void>;
+  subscribe(listener: () => void): () => void;
+}
+
 /** Application capabilities consumed by user-facing features. */
 export interface FeatureHost {
   readonly app: App;
@@ -64,6 +71,7 @@ export interface FeatureHost {
   readonly providerHost: ProviderHost;
   readonly settings: ClaudianSettings;
   readonly periodicJobs: PeriodicJobsPort;
+  readonly oneOffJobs: OneOffJobsPort;
   readonly storage: SharedAppStorage;
   readonly warmExecutionPool: WarmExecutionPool;
 

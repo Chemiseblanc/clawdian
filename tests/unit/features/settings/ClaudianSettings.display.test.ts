@@ -103,6 +103,7 @@ import { DEFAULT_CLAUDIAN_SETTINGS } from '@/app/settings/defaultSettings';
 import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
 import { ProviderWorkspaceRegistry } from '@/core/providers/ProviderWorkspaceRegistry';
 import { ClaudianSettingTab } from '@/features/settings/ClaudianSettings';
+import { OneOffJobSettings } from '@/features/settings/ui/OneOffJobSettings';
 import { PeriodicJobSettings } from '@/features/settings/ui/PeriodicJobSettings';
 import { t } from '@/i18n/i18n';
 
@@ -121,6 +122,11 @@ function createTab(enableDualPane: boolean, enableFilePane = true): {
       runNow: jest.fn(),
       setEnabled: jest.fn(),
       isRunning: jest.fn(() => false),
+      subscribe: jest.fn(() => jest.fn()),
+    },
+    oneOffJobs: {
+      list: jest.fn(() => []),
+      delete: jest.fn(),
       subscribe: jest.fn(() => jest.fn()),
     },
     settings,
@@ -280,12 +286,14 @@ describe('ClaudianSettingTab display settings', () => {
   it('disposes the previous Jobs renderer before a second display', () => {
     const { tab } = createTab(true);
     tab.containerEl = document.createElement('div');
-    const dispose = jest.spyOn(PeriodicJobSettings.prototype, 'dispose');
+    const disposePeriodic = jest.spyOn(PeriodicJobSettings.prototype, 'dispose');
+    const disposeOneOff = jest.spyOn(OneOffJobSettings.prototype, 'dispose');
 
     tab.display();
     tab.display();
 
-    expect(dispose).toHaveBeenCalledTimes(1);
+    expect(disposePeriodic).toHaveBeenCalledTimes(1);
+    expect(disposeOneOff).toHaveBeenCalledTimes(1);
   });
 
 });

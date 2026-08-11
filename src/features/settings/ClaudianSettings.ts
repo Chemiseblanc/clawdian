@@ -23,6 +23,7 @@ import {
 import type { FeatureHost } from '../FeatureHost';
 import { AgentSkillManagementCoordinator } from './AgentSkillManagementCoordinator';
 import { buildNavMappingText, parseNavMappings } from './keyboardNavigation';
+import { OneOffJobSettings } from './ui/OneOffJobSettings';
 import { PeriodicJobSettings } from './ui/PeriodicJobSettings';
 
 type SettingsTabId = string;
@@ -121,6 +122,7 @@ export class ClaudianSettingTab extends PluginSettingTab {
   private displayGeneration = 0;
   private readonly agentSkillCoordinator: AgentSkillManagementCoordinator;
   private periodicJobSettings: PeriodicJobSettings | null = null;
+  private oneOffJobSettings: OneOffJobSettings | null = null;
 
   constructor(app: App, plugin: FeatureHost & Plugin) {
     super(app, plugin);
@@ -145,6 +147,8 @@ export class ClaudianSettingTab extends PluginSettingTab {
     this.agentSkillCoordinator.resetSubscriptions();
     this.periodicJobSettings?.dispose();
     this.periodicJobSettings = null;
+    this.oneOffJobSettings?.dispose();
+    this.oneOffJobSettings = null;
     const { containerEl } = this;
     containerEl.empty();
     containerEl.addClass('claudian-settings');
@@ -276,6 +280,10 @@ export class ClaudianSettingTab extends PluginSettingTab {
 
     this.renderGeneralTab(tabContents.get('general')!);
     this.periodicJobSettings = new PeriodicJobSettings(
+      tabContents.get('jobs')!,
+      this.plugin,
+    );
+    this.oneOffJobSettings = new OneOffJobSettings(
       tabContents.get('jobs')!,
       this.plugin,
     );

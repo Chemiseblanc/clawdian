@@ -1,6 +1,7 @@
 
 import { TFile, TFolder } from 'obsidian';
 
+import { OneOffJobsService } from '@/app/jobs/OneOffJobsService';
 import { PeriodicJobsService } from '@/app/jobs/PeriodicJobsService';
 import { ConversationPersistenceStore } from '@/core/bootstrap/ConversationPersistenceStore';
 import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
@@ -1111,6 +1112,12 @@ describe('ClaudianPlugin', () => {
       ).mockImplementation(async () => {
         calls.push('reconcile');
       });
+      const reconcileOneOff = jest.spyOn(
+        OneOffJobsService.prototype,
+        'reconcileInterruptedRuns',
+      ).mockImplementation(async () => {
+        calls.push('reconcile-one-off');
+      });
       const start = jest.spyOn(PeriodicJobsService.prototype, 'start')
         .mockImplementation(() => {
           expect(plugin.settings).toBeDefined();
@@ -1119,8 +1126,9 @@ describe('ClaudianPlugin', () => {
 
       await plugin.onload();
 
-      expect(calls).toEqual(['reconcile', 'start']);
+      expect(calls).toEqual(['reconcile', 'reconcile-one-off', 'start']);
       reconcile.mockRestore();
+      reconcileOneOff.mockRestore();
       start.mockRestore();
     });
 
@@ -1152,6 +1160,9 @@ describe('ClaudianPlugin', () => {
       const stop = jest.spyOn(plugin.periodicJobs, 'stop').mockImplementation(async () => {
         calls.push('jobs');
       });
+      const stopOneOff = jest.spyOn(plugin.oneOffJobs, 'stop').mockImplementation(async () => {
+        calls.push('one-off-jobs');
+      });
       const lifecycle = jest.spyOn(plugin.executionLifecycleRegistry, 'dispose')
         .mockImplementation(async () => {
           calls.push('lifecycle');
@@ -1164,8 +1175,9 @@ describe('ClaudianPlugin', () => {
       plugin.onunload();
       await getApplicationShutdownPromise(plugin);
 
-      expect(calls).toEqual(['jobs', 'lifecycle', 'workspaces']);
+      expect(calls).toEqual(['jobs', 'one-off-jobs', 'lifecycle', 'workspaces']);
       stop.mockRestore();
+      stopOneOff.mockRestore();
       lifecycle.mockRestore();
       workspaces.mockRestore();
     });

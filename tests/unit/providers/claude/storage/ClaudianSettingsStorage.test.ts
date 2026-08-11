@@ -68,6 +68,7 @@ describe('ClaudianSettingsStorage', () => {
       expect(result.enableFilePane).toBe(true);
       expect(result.dualPaneSide).toBe('right');
       expect(result.periodicJobs).toEqual([]);
+      expect(result.oneOffJobs).toEqual([]);
       expect(mockAdapter.read).not.toHaveBeenCalled();
     });
 
@@ -859,6 +860,46 @@ describe('ClaudianSettingsStorage', () => {
 
       expect(result.periodicJobs).toEqual(periodicJobs);
       expect(mockAdapter.write).not.toHaveBeenCalled();
+    });
+
+    it('round-trips valid one-off jobs and normalizes malformed records', async () => {
+      const validJobs = [
+        {
+          id: 'running',
+          name: 'Running job',
+          prompt: 'Keep working',
+          model: { providerId: 'claude', model: 'stale-but-owned' },
+          startedAt: 10,
+          status: 'running',
+          summary: '',
+        },
+        {
+          id: 'completed',
+          name: 'Completed job',
+          prompt: 'Finish work',
+          model: { providerId: 'claude', model: 'stale-but-owned' },
+          startedAt: 20,
+          completedAt: 30,
+          status: 'succeeded',
+          summary: 'done',
+        },
+      ];
+      mockAdapter.exists.mockResolvedValue(true);
+      mockAdapter.read.mockResolvedValue(JSON.stringify({
+        lastSelectedChatModel: null,
+        oneOffJobs: [
+          ...validJobs,
+          { ...validJobs[0], id: 'bad-running', completedAt: 11 },
+          { ...validJobs[1], id: 'bad-completed', completedAt: 19 },
+          { ...validJobs[0], id: 'running', name: 'Duplicate' },
+        ],
+      }));
+
+      const result = await storage.load();
+      const writtenContent = JSON.parse(mockAdapter.write.mock.calls[0][1]);
+
+      expect(result.oneOffJobs).toEqual(validJobs);
+      expect(writtenContent.oneOffJobs).toEqual(validJobs);
     });
 
     it('removes duplicate and malformed periodic jobs and re-saves normalization', async () => {

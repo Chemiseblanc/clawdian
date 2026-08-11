@@ -107,3 +107,49 @@
 .claudian-periodic-job-runtime .claudian-periodic-job-run {
   margin-top: 10px;
 }
+
+.claudian-one-off-jobs {
+  margin-top: 28px;
+  padding-top: 20px;
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+.claudian-one-off-jobs h3 {
+  margin: 0;
+}
+
+.claudian-one-off-jobs-description {
+  margin: 6px 0 12px;
+}
+
+.claudian-one-off-job-status {
+  padding: 1px 6px;
+  border-radius: 999px;
+  color: var(--text-muted);
+  background: var(--background-modifier-border);
+  font-size: var(--font-ui-smaller);
+}
+
+.claudian-one-off-job-status--succeeded {
+  color: var(--text-success);
+}
+
+.claudian-one-off-job-status--failed,
+.claudian-one-off-job-status--interrupted {
+  color: var(--text-error);
+}
+
+.claudian-one-off-job-prompt {
+  display: -webkit-box;
+  overflow: hidden;
+  margin-top: 4px;
+  color: var(--text-normal);
+  font-size: var(--font-ui-small);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.claudian-one-off-job-delete {
+  width: auto;
+  min-width: max-content;
+}
