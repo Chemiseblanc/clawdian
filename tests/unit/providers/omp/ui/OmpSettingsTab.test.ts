@@ -277,6 +277,7 @@ function createElement(): any {
       element.text = value;
     }),
     empty: jest.fn(),
+    appendText: jest.fn(),
     setAttribute: jest.fn(),
     addEventListener: jest.fn((type: string, callback: (...args: unknown[]) => void) => {
       const listeners = eventListeners.get(type) ?? [];
@@ -327,6 +328,9 @@ function applyElementAttrs(element: any, attrs?: Record<string, unknown>): void 
   }
   if (typeof attrs.value === 'string') {
     element.value = attrs.value;
+  }
+  if (typeof attrs.href === 'string') {
+    element.href = attrs.href;
   }
   if (typeof attrs.type === 'string') {
     element.type = attrs.type;
@@ -535,6 +539,28 @@ describe('OmpSettingsTab', () => {
       'omp',
       expect.objectContaining({ name: 'Hidden Oh My Pi commands and skills' }),
     );
+  });
+
+  it('directs MCP setup to the native Oh My Pi session command', () => {
+    render({ providerConfigs: { omp: {} } });
+
+    expect(findSetting('MCP Servers').heading).toBe(true);
+    const notice = findElement('div', 'claudian-mcp-settings-desc');
+    const description = notice.createEl.mock.results[0].value;
+    expect(description.appendText).toHaveBeenNthCalledWith(
+      1,
+      'Oh My Pi manages MCP servers natively. In an Oh My Pi session, configure them with ',
+    );
+    expect(description.createEl.mock.results[0].value.appendText)
+      .toHaveBeenCalledWith('/mcp add');
+    expect(description.appendText).toHaveBeenNthCalledWith(
+      2,
+      ' and they will be available in Claudian. ',
+    );
+    expect(description.createEl).toHaveBeenCalledWith('a', {
+      href: 'https://github.com/can1357/oh-my-pi/blob/main/docs/mcp-config.md',
+      text: 'Learn more',
+    });
   });
 
   it('does not render the chat input tool mode setting for Omp', () => {

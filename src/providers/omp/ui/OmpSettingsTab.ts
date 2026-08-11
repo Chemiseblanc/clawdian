@@ -10,6 +10,7 @@ import type {
 import { t } from '../../../i18n/i18n';
 import { renderEnvironmentSettingsSection } from '../../../shared/settings/EnvironmentSettingsSection';
 import { renderHostnameCliPathSetting } from '../../../shared/settings/HostnameCliPathSetting';
+import { renderNativeMcpSettingsSection } from '../../../shared/settings/NativeMcpSettingsSection';
 import { renderProviderEnablementSetting } from '../../../shared/settings/ProviderEnablementSetting';
 import {
   renderLastEnabledProviderWarning,
@@ -127,6 +128,15 @@ export const ompSettingsTabRenderer: ProviderSettingsTabRenderer = {
       name: 'Hidden Oh My Pi commands and skills',
       desc: 'Hide runtime commands and skills advertised by Oh My Pi from the command dropdown. Enter exact names without the leading slash, one per line.',
       placeholder: 'skill:review\ncompact',
+    });
+
+    renderNativeMcpSettingsSection(container, {
+      descriptionAfterCommand: ' and they will be available in Claudian. ',
+      descriptionBeforeCommand: 'Oh My Pi manages MCP servers natively. In an Oh My Pi session, configure them with ',
+      documentationLabel: 'Learn more',
+      documentationUrl: 'https://github.com/can1357/oh-my-pi/blob/main/docs/mcp-config.md',
+      heading: t('settings.mcpServers.name'),
+      setupCommand: '/mcp add',
     });
 
     renderEnvironmentSettingsSection({
