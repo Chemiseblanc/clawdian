@@ -1074,7 +1074,7 @@ implements ProviderExecutionSession, SteerableExecutionSession {
     generation: number,
   ): Promise<void> {
     try {
-      const response = await kernel.request<unknown>('get_commands', {}, 10_000);
+      const response = await kernel.request<unknown>('get_available_commands', {}, 10_000);
       if (!this.isCurrentKernel(kernel, generation) || this.disposed) return;
       this.services.commandCatalog.setCommandSnapshot(
         normalizeOmpRuntimeCommands(response),

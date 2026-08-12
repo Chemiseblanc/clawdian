@@ -119,6 +119,7 @@ Provider-specific session fields belong behind typed helpers in the owning provi
 ## Provider Rules
 
 - Prefer provider-native behavior over local reimplementation. Adapt provider output at the boundary instead of shadowing provider features.
+- Provider protocol tests must assert provider-owned method names and payloads at the transport boundary. A high-level fake that accepts the implementation's request is not sufficient contract coverage.
 - Keep live streaming and history replay responsibilities separate. Live output should come from the provider runtime protocol when available; provider transcript files are the replay source.
 - New provider behavior must be expressed through registries and capabilities: `ProviderRegistry`, `ProviderWorkspaceRegistry`, `ProviderChatUIConfig`, provider capabilities, and provider-owned settings reconciliation.
 - Model, permission, plan-mode, command, MCP, skill, and subagent behavior is provider-specific unless the core contract explicitly makes it shared.

@@ -74,7 +74,7 @@ export class OmpCommandMetadataProbe {
       initialize: kernel => kernel.start(),
       query: async (kernel, ownedSignal) => {
         const response = await kernel.request<unknown>(
-          'get_commands',
+          'get_available_commands',
           {},
           10_000,
           ownedSignal,

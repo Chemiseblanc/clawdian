@@ -56,7 +56,7 @@ export interface Thread {
   id: string;
   preview: string;
   ephemeral: boolean;
-  path: string;
+  path: string | null;
   cwd: string;
   cliVersion: string;
   status: ThreadStatus;

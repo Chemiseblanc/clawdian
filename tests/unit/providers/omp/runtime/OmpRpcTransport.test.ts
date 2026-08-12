@@ -118,7 +118,7 @@ describe('OmpRpcTransport', () => {
     const { input, transport } = createTransport();
     const abortController = new AbortController();
     const request = transport.request(
-      'get_commands',
+      'get_available_commands',
       {},
       1_000,
       abortController.signal,
@@ -126,7 +126,7 @@ describe('OmpRpcTransport', () => {
 
     abortController.abort();
 
-    await expect(request).rejects.toThrow('Request aborted: get_commands');
+    await expect(request).rejects.toThrow('Request aborted: get_available_commands');
     input.write('{"type":"response","id":"req_1","success":true,"result":[]}\n');
     expect((transport as any).pending).toHaveProperty('size', 0);
   });
