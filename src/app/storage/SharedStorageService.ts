@@ -8,7 +8,7 @@ import { normalizeTabManagerState } from '../../core/bootstrap/tabManagerState';
 import type { AppTabManagerState } from '../../core/providers/types';
 import { VaultFileAdapter } from '../../core/storage/VaultFileAdapter';
 import { ClaudianSettingsStorage, type StoredClaudianSettings } from '../settings/ClaudianSettingsStorage';
-
+import { McpStorage } from './McpStorage';
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value);
 }
@@ -17,6 +17,7 @@ export class SharedStorageService implements SharedAppStorage {
   readonly claudianSettings: ClaudianSettingsStorage;
   readonly sessions: SessionStorage;
   readonly conversationPersistence: ConversationPersistenceStore;
+  readonly mcp: McpStorage;
 
   private adapter: VaultFileAdapter;
   private plugin: Plugin;
@@ -27,6 +28,7 @@ export class SharedStorageService implements SharedAppStorage {
     this.claudianSettings = new ClaudianSettingsStorage(this.adapter);
     this.sessions = new SessionStorage(this.adapter);
     this.conversationPersistence = new ConversationPersistenceStore(this.adapter);
+    this.mcp = new McpStorage(this.adapter);
   }
 
   async initialize(): Promise<{ claudian: Record<string, unknown> }> {

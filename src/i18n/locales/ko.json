@@ -169,7 +169,7 @@
     },
     "mcpServers": {
       "name": "MCP 서버",
-      "desc": ".claude/mcp.json에 저장된 Vault 수준의 MCP 서버 구성을 관리합니다. 컨텍스트 저장 모드 서버는 @mention으로 활성화해야 합니다."
+      "desc": "Vault 루트의 .mcp.json에 저장된 이식 가능한 MCP 서버 구성을 관리합니다. Claude Code, Copilot CLI, Oh My Pi는 모두 이 공유 서버를 발견할 수 있습니다."
     },
     "plugins": {
       "name": "Claude Code 플러그인",

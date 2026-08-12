@@ -1378,6 +1378,21 @@ export default class ClaudianPlugin extends Plugin {
     );
   }
 
+  async reloadMcpServers(): Promise<void> {
+    const reloads = ProviderRegistry.getRegisteredProviderIds().flatMap((providerId) => {
+      const manager = ProviderWorkspaceRegistry.getSharedMcpServerManager(providerId);
+      return manager ? [{ manager, providerId }] : [];
+    });
+    if (reloads.length === 0) return;
+
+    await this.runProviderExecutionTransition(
+      reloads.map(({ providerId }) => providerId),
+      async () => {
+        await Promise.all(reloads.map(({ manager }) => manager.reloadServers()));
+      },
+    );
+  }
+
   private async resetDeletedConversationTabs(id: string): Promise<void> {
     const errors: unknown[] = [];
     for (const view of this.getAllViews()) {

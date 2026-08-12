@@ -49,21 +49,6 @@ export interface McpConfigFile {
   mcpServers: Record<string, McpServerConfig>;
 }
 
-/** Extended config file with app-owned server metadata. */
-export interface ManagedMcpConfigFile extends McpConfigFile {
-  _claudian?: {
-    /** Per-server UI/runtime settings. */
-    servers: Record<
-      string,
-      {
-        enabled?: boolean;
-        contextSaving?: boolean;
-        disabledTools?: string[];
-        description?: string;
-      }
-    >;
-  };
-}
 
 /** Result of parsing clipboard config. */
 export interface ParsedMcpConfig {

@@ -12,7 +12,7 @@ describe('McpTestModal mutation failures', () => {
       disabledTools: new Set<string>(),
       onToolToggle: jest.fn().mockRejectedValue(
         new NotifiedMutationError(
-          'Failed to update .claude/mcp.json because it contains invalid JSON.',
+          'Invalid .mcp.json: contains malformed JSON',
         ),
       ),
       toolElements: new Map([['alpha', {} as HTMLElement]]),

@@ -1,6 +1,11 @@
 import type { App } from 'obsidian';
 import { Modal, Notice, Setting } from 'obsidian';
 
+import {
+  assertPortableMcpServerName,
+  isPortableMcpServerConfig,
+  parsePortableKeyValueLines,
+} from '../../core/mcp/McpConfigParser';
 import type {
   ManagedMcpServer,
   McpHttpServerConfig,
@@ -12,9 +17,14 @@ import type {
 import { DEFAULT_MCP_SERVER, getMcpServerType } from '../../core/types';
 import { formatCommand, parseCommand } from '../../utils/mcp';
 
+export interface McpServerModalOptions {
+  portable?: boolean;
+}
+
 export class McpServerModal extends Modal {
   private existingServer: ManagedMcpServer | null;
-  private onSave: (server: ManagedMcpServer) => void;
+  private onSave: (server: ManagedMcpServer) => void | Promise<void>;
+  private portable: boolean;
 
   private serverName = '';
   private serverType: McpServerType = 'stdio';
@@ -26,27 +36,34 @@ export class McpServerModal extends Modal {
   private headers = '';
   private typeFieldsEl: HTMLElement | null = null;
   private nameInputEl: HTMLInputElement | null = null;
+  private saveBtnEl: HTMLButtonElement | null = null;
+  private saving = false;
+  private sourceConfig: McpServerConfig | null = null;
 
   constructor(
     app: App,
     existingServer: ManagedMcpServer | null,
-    onSave: (server: ManagedMcpServer) => void,
+    onSave: (server: ManagedMcpServer) => void | Promise<void>,
     initialType?: McpServerType,
-    prefillConfig?: { name: string; config: McpServerConfig }
+    prefillConfig?: { name: string; config: McpServerConfig },
+    options?: McpServerModalOptions
   ) {
     super(app);
     this.existingServer = existingServer;
     this.onSave = onSave;
+    this.portable = options?.portable ?? false;
 
     if (existingServer) {
       this.serverName = existingServer.name;
       this.serverType = getMcpServerType(existingServer.config);
       this.enabled = existingServer.enabled;
       this.contextSaving = existingServer.contextSaving;
+      this.sourceConfig = existingServer.config;
       this.initFromConfig(existingServer.config);
     } else if (prefillConfig) {
       this.serverName = prefillConfig.name;
       this.serverType = getMcpServerType(prefillConfig.config);
+      this.sourceConfig = prefillConfig.config;
       this.initFromConfig(prefillConfig.config);
     } else if (initialType) {
       this.serverType = initialType;
@@ -54,15 +71,12 @@ export class McpServerModal extends Modal {
   }
 
   private initFromConfig(config: McpServerConfig) {
-    const type = getMcpServerType(config);
-    if (type === 'stdio') {
-      const stdioConfig = config as McpStdioServerConfig;
-      this.command = formatCommand(stdioConfig.command, stdioConfig.args);
-      this.env = this.envRecordToString(stdioConfig.env);
+    if ('command' in config) {
+      this.command = formatCommand(config.command, config.args);
+      this.env = this.envRecordToString(config.env);
     } else {
-      const urlConfig = config as McpSSEServerConfig | McpHttpServerConfig;
-      this.url = urlConfig.url;
-      this.headers = this.envRecordToString(urlConfig.headers);
+      this.url = config.url;
+      this.headers = this.envRecordToString(config.headers);
     }
   }
 
@@ -102,25 +116,27 @@ export class McpServerModal extends Modal {
     this.typeFieldsEl = contentEl.createDiv({ cls: 'claudian-mcp-type-fields' });
     this.renderTypeFields();
 
-    new Setting(contentEl)
-      .setName('Enabled')
-      .setDesc('Whether this server is active')
-      .addToggle((toggle) => {
-        toggle.setValue(this.enabled);
-        toggle.onChange((value) => {
-          this.enabled = value;
+    if (!this.portable) {
+      new Setting(contentEl)
+        .setName('Enabled')
+        .setDesc('Whether this server is active')
+        .addToggle((toggle) => {
+          toggle.setValue(this.enabled);
+          toggle.onChange((value) => {
+            this.enabled = value;
+          });
         });
-      });
 
-    new Setting(contentEl)
-      .setName('Context-saving mode')
-      .setDesc('Hide tools from agent unless @-mentioned (saves context window)')
-      .addToggle((toggle) => {
-        toggle.setValue(this.contextSaving);
-        toggle.onChange((value) => {
-          this.contextSaving = value;
+      new Setting(contentEl)
+        .setName('Context-saving mode')
+        .setDesc('Hide tools from agent unless @-mentioned (saves context window)')
+        .addToggle((toggle) => {
+          toggle.setValue(this.contextSaving);
+          toggle.onChange((value) => {
+            this.contextSaving = value;
+          });
         });
-      });
+    }
 
     const buttonContainer = contentEl.createDiv({ cls: 'claudian-mcp-buttons' });
 
@@ -130,11 +146,13 @@ export class McpServerModal extends Modal {
     });
     cancelBtn.addEventListener('click', () => this.close());
 
-    const saveBtn = buttonContainer.createEl('button', {
+    this.saveBtnEl = buttonContainer.createEl('button', {
       text: this.existingServer ? 'Update' : 'Add',
       cls: 'claudian-save-btn mod-cta',
     });
-    saveBtn.addEventListener('click', () => this.save());
+    this.saveBtnEl.addEventListener('click', () => {
+      void this.save();
+    });
   }
 
   private renderTypeFields() {
@@ -190,7 +208,7 @@ export class McpServerModal extends Modal {
       .setDesc(this.serverType === 'sse' ? 'SSE endpoint URL' : 'HTTP endpoint URL')
       .addText((text) => {
         text.setValue(this.url);
-        text.setPlaceholder('HTTP://localhost:3000/sse');
+        text.setPlaceholder('HTTPS://localhost:3000/mcp');
         text.onChange((value) => {
           this.url = value;
         });
@@ -217,14 +235,16 @@ export class McpServerModal extends Modal {
     // !e.isComposing for IME support
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
       e.preventDefault();
-      this.save();
+      void this.save();
     } else if (e.key === 'Escape' && !e.isComposing) {
       e.preventDefault();
       this.close();
     }
   }
 
-  private save() {
+  private async save(): Promise<void> {
+    if (this.saving) return;
+
     const name = this.serverName.trim();
     if (!name) {
       new Notice('Please enter a server name');
@@ -232,90 +252,121 @@ export class McpServerModal extends Modal {
       return;
     }
 
-    if (!/^[a-zA-Z0-9._-]+$/.test(name)) {
-      new Notice('Server name can only contain letters, numbers, dots, hyphens, and underscores');
+    try {
+      if (this.portable) {
+        assertPortableMcpServerName(name);
+      } else if (!/^[a-zA-Z0-9._-]+$/.test(name)) {
+        throw new Error('Server name can only contain letters, numbers, dots, hyphens, and underscores');
+      }
+    } catch (error) {
+      new Notice(error instanceof Error ? error.message : 'Invalid server name');
       this.nameInputEl?.focus();
       return;
     }
 
     let config: McpServerConfig;
+    try {
+      config = this.buildConfig();
+      if (this.portable && !isPortableMcpServerConfig(config)) {
+        throw new Error('Invalid portable MCP server configuration');
+      }
+    } catch (error) {
+      new Notice(error instanceof Error ? error.message : 'Invalid MCP server configuration');
+      return;
+    }
+
+    const server: ManagedMcpServer = this.portable
+      ? { name, config, enabled: true, contextSaving: false }
+      : {
+          name,
+          config,
+          enabled: this.enabled,
+          contextSaving: this.contextSaving,
+          disabledTools: this.existingServer?.disabledTools,
+        };
+
+    this.saving = true;
+    if (this.saveBtnEl) this.saveBtnEl.disabled = true;
+    try {
+      await this.onSave(server);
+      this.close();
+    } catch (error) {
+      new Notice(error instanceof Error ? error.message : 'Failed to save MCP server');
+    } finally {
+      this.saving = false;
+      if (this.saveBtnEl) this.saveBtnEl.disabled = false;
+    }
+  }
+
+  private buildConfig(): McpServerConfig {
+    const previous: Record<string, unknown> = {};
+    if (this.sourceConfig) {
+      for (const [key, value] of Object.entries(this.sourceConfig)) {
+        previous[key] = value;
+      }
+    }
+    const hadExplicitType = typeof previous.type === 'string';
+
+    delete previous.type;
+    delete previous.command;
+    delete previous.args;
+    delete previous.env;
+    delete previous.url;
+    delete previous.headers;
 
     if (this.serverType === 'stdio') {
       const fullCommand = this.command.trim();
-      if (!fullCommand) {
-        new Notice('Please enter a command');
-        return;
-      }
+      if (!fullCommand) throw new Error('Please enter a command');
+      const { cmd, args } = this.parsePortableCommand(fullCommand);
+      if (!cmd.trim()) throw new Error('Please enter a command');
 
-      const { cmd, args } = parseCommand(fullCommand);
-      const stdioConfig: McpStdioServerConfig = { command: cmd };
+      const config: McpStdioServerConfig & Record<string, unknown> = {
+        ...previous,
+        command: cmd,
+      };
+      if (this.portable || hadExplicitType) config.type = 'stdio';
+      if (args.length > 0) config.args = args;
 
-      if (args.length > 0) {
-        stdioConfig.args = args;
-      }
-
-      const env = this.parseEnvString(this.env);
-      if (Object.keys(env).length > 0) {
-        stdioConfig.env = env;
-      }
-
-      config = stdioConfig;
-    } else {
-      const url = this.url.trim();
-      if (!url) {
-        new Notice('Please enter a URL');
-        return;
-      }
-
-      if (this.serverType === 'sse') {
-        const sseConfig: McpSSEServerConfig = { type: 'sse', url };
-        const headers = this.parseEnvString(this.headers);
-        if (Object.keys(headers).length > 0) {
-          sseConfig.headers = headers;
-        }
-        config = sseConfig;
-      } else {
-        const httpConfig: McpHttpServerConfig = { type: 'http', url };
-        const headers = this.parseEnvString(this.headers);
-        if (Object.keys(headers).length > 0) {
-          httpConfig.headers = headers;
-        }
-        config = httpConfig;
-      }
+      const env = this.parseEnvString(this.env, 'environment variable');
+      if (Object.keys(env).length > 0) config.env = env;
+      return config;
     }
 
-    const server: ManagedMcpServer = {
-      name,
-      config,
-      enabled: this.enabled,
-      contextSaving: this.contextSaving,
-      disabledTools: this.existingServer?.disabledTools,
+    const url = this.url.trim();
+    if (!url) throw new Error('Please enter a URL');
+    if (!/^https?:\/\//i.test(url)) throw new Error('URL must be an absolute HTTP(S) URL');
+
+    const config: (McpSSEServerConfig | McpHttpServerConfig) & Record<string, unknown> = {
+      ...previous,
+      type: this.serverType,
+      url,
     };
 
-    this.onSave(server);
-    this.close();
+    const headers = this.parseEnvString(this.headers, 'header');
+    if (Object.keys(headers).length > 0) config.headers = headers;
+    return config;
   }
 
-  private parseEnvString(envStr: string): Record<string, string> {
-    const result: Record<string, string> = {};
-    if (!envStr.trim()) return result;
-
-    for (const line of envStr.split('\n')) {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith('#')) continue;
-
-      const eqIndex = trimmed.indexOf('=');
-      if (eqIndex === -1) continue;
-
-      const key = trimmed.substring(0, eqIndex).trim();
-      const value = trimmed.substring(eqIndex + 1).trim();
-
-      if (key) {
-        result[key] = value;
+  private parsePortableCommand(command: string): { cmd: string; args: string[] } {
+    let quote: '"' | "'" | null = null;
+    let escaped = false;
+    for (const char of command) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === '\\') {
+        escaped = true;
+      } else if (quote) {
+        if (char === quote) quote = null;
+      } else if (char === '"' || char === "'") {
+        quote = char;
       }
     }
+    if (quote) throw new Error('Command contains an unterminated quote');
+    return parseCommand(command);
+  }
 
-    return result;
+  private parseEnvString(envStr: string, fieldName = 'environment variable'): Record<string, string> {
+    return parsePortableKeyValueLines(envStr, fieldName);
   }
 
   private envRecordToString(env: Record<string, string> | undefined): string {

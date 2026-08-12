@@ -10,6 +10,8 @@ export class McpServerManager {
   private servers: ManagedMcpServer[] = [];
   private storage: McpStorageAdapter;
   private loadPromise: Promise<void> | null = null;
+  private reloadPromise: Promise<void> | null = null;
+  private loadGeneration = 0;
   private loaded = false;
 
   constructor(storage: McpStorageAdapter) {
@@ -20,11 +22,8 @@ export class McpServerManager {
     if (this.loadPromise) {
       return this.loadPromise;
     }
-    const promise = this.storage.load().then((servers) => {
-      this.servers = servers;
-      this.loaded = true;
-    });
-    this.loadPromise = promise;
+
+    const promise = this.beginLoad();
     try {
       await promise;
     } finally {
@@ -32,6 +31,64 @@ export class McpServerManager {
         this.loadPromise = null;
       }
     }
+  }
+
+  /**
+   * Reloads from storage after any active read has settled.
+   *
+   * A reload is deliberately a fresh read rather than a join with the active
+   * load. Serializing reload requests and fencing completions prevents a
+   * slower, older read from replacing the newest server snapshot.
+   */
+  async reloadServers(): Promise<void> {
+    const previousReload = this.reloadPromise;
+    const operation = (async () => {
+      if (previousReload) {
+        await previousReload.catch(() => undefined);
+      }
+
+      const activeLoad = this.loadPromise;
+      if (activeLoad) {
+        await activeLoad.catch(() => undefined);
+      }
+
+      const promise = this.beginLoad();
+      try {
+        await promise;
+      } finally {
+        if (this.loadPromise === promise) {
+          this.loadPromise = null;
+        }
+      }
+    })();
+    this.reloadPromise = operation;
+    try {
+      await operation;
+    } finally {
+      if (this.reloadPromise === operation) {
+        this.reloadPromise = null;
+      }
+    }
+  }
+
+  private beginLoad(): Promise<void> {
+    const generation = ++this.loadGeneration;
+    let storageLoad: Promise<ManagedMcpServer[]>;
+    try {
+      storageLoad = Promise.resolve(this.storage.load());
+    } catch (error) {
+      storageLoad = Promise.reject(error);
+    }
+
+    const promise = storageLoad.then((servers) => {
+      if (generation !== this.loadGeneration) {
+        return;
+      }
+      this.servers = servers;
+      this.loaded = true;
+    });
+    this.loadPromise = promise;
+    return promise;
   }
 
   async ensureLoaded(): Promise<void> {

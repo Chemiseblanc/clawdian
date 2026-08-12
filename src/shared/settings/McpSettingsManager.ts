@@ -1,16 +1,25 @@
 import type { App } from 'obsidian';
 import { Notice, setIcon } from 'obsidian';
 
-import { tryParseClipboardConfig } from '../../core/mcp/McpConfigParser';
-import type { AppMcpStorage } from '../../core/providers/types';
+import type { AppMcpStorage, McpConfigMutation } from '../../core/bootstrap/storage';
+import {
+  assertPortableMcpServerName,
+  isPortableMcpServerConfig,
+  parseClipboardConfig,
+} from '../../core/mcp/McpConfigParser';
+import { testMcpServer } from '../../core/mcp/McpTester';
 import { isNotifiedMutationError } from '../../core/storage/NotifiedMutationError';
 import type { ManagedMcpServer, McpServerConfig, McpServerType } from '../../core/types';
-import { DEFAULT_MCP_SERVER, getMcpServerType } from '../../core/types';
+import { getMcpServerType } from '../../core/types';
 import { formatCommand } from '../../utils/mcp';
 import { confirmDelete } from '../modals/ConfirmModal';
 import { McpImportModal } from './McpImportModal';
 import { McpServerModal } from './McpServerModal';
 import { McpTestModal } from './McpTestModal';
+const PORTABLE_DEFAULTS = {
+  enabled: true,
+  contextSaving: false,
+} as const;
 
 export interface McpSettingsManagerDeps {
   app: App;
@@ -18,31 +27,79 @@ export interface McpSettingsManagerDeps {
   broadcastMcpReload: () => Promise<void>;
 }
 
+export interface McpSettingsManagerOptions {
+  portable?: boolean;
+}
+
+function asError(error: unknown, fallback: string): Error {
+  return error instanceof Error ? error : new Error(fallback);
+}
+
 export class McpSettingsManager {
   private app: App;
   private containerEl: HTMLElement;
   private mcpStorage: AppMcpStorage;
   private broadcastMcpReload: () => Promise<void>;
+  private portable: boolean;
   private servers: ManagedMcpServer[] = [];
+  private loadError: Error | null = null;
+  private loadGeneration = 0;
+  private disposed = false;
+  private mutationQueue: Promise<void> = Promise.resolve();
+  private outsideClickHandler: (() => void) | null = null;
 
-  constructor(containerEl: HTMLElement, deps: McpSettingsManagerDeps) {
+  constructor(
+    containerEl: HTMLElement,
+    deps: McpSettingsManagerDeps,
+    options: McpSettingsManagerOptions = {},
+  ) {
     this.app = deps.app;
     this.containerEl = containerEl;
     this.mcpStorage = deps.mcpStorage;
     this.broadcastMcpReload = deps.broadcastMcpReload;
+    this.portable = options.portable ?? true;
     void this.loadAndRender();
   }
 
-  private async loadAndRender() {
-    this.servers = await this.mcpStorage.load();
-    this.render();
+  private async loadAndRender(): Promise<void> {
+    const generation = ++this.loadGeneration;
+    try {
+      const servers = await this.mcpStorage.load();
+      if (this.disposed || generation !== this.loadGeneration) return;
+      this.servers = servers;
+      this.loadError = null;
+      this.render();
+    } catch (error) {
+      if (this.disposed || generation !== this.loadGeneration) return;
+      this.servers = [];
+      this.loadError = asError(error, 'Unable to read .mcp.json');
+      this.render();
+    }
   }
 
   private render() {
+    if (this.disposed) return;
+    if (this.outsideClickHandler) {
+      const doc = this.containerEl.ownerDocument;
+      doc?.removeEventListener('click', this.outsideClickHandler);
+      this.outsideClickHandler = null;
+    }
     this.containerEl.empty();
 
     const headerEl = this.containerEl.createDiv({ cls: 'claudian-mcp-header' });
     headerEl.createSpan({ text: 'MCP Servers', cls: 'claudian-mcp-label' });
+
+    if (this.loadError) {
+      const errorEl = this.containerEl.createDiv({
+        cls: 'claudian-mcp-error',
+        attr: { role: 'alert' },
+      });
+      errorEl.createEl('strong', { text: 'Unable to read .mcp.json' });
+      errorEl.createDiv({
+        text: this.loadError.message || 'The MCP configuration is read-only until it can be read.',
+      });
+      return;
+    }
 
     const addContainer = headerEl.createDiv({ cls: 'claudian-mcp-add-container' });
     const addBtn = addContainer.createEl('button', {
@@ -82,9 +139,11 @@ export class McpSettingsManager {
       dropdown.toggleClass('is-visible', !dropdown.hasClass('is-visible'));
     });
 
-    (this.containerEl.ownerDocument ?? window.document).addEventListener('click', () => {
-      dropdown.removeClass('is-visible');
-    });
+    const doc = this.containerEl.ownerDocument;
+    if (doc) {
+      this.outsideClickHandler = () => dropdown.removeClass('is-visible');
+      doc.addEventListener('click', this.outsideClickHandler);
+    }
 
     if (this.servers.length === 0) {
       const emptyEl = this.containerEl.createDiv({ cls: 'claudian-mcp-empty' });
@@ -100,19 +159,8 @@ export class McpSettingsManager {
 
   private renderServerItem(listEl: HTMLElement, server: ManagedMcpServer) {
     const itemEl = listEl.createDiv({ cls: 'claudian-mcp-item' });
-    if (!server.enabled) {
-      itemEl.addClass('claudian-mcp-item-disabled');
-    }
-
-    const statusEl = itemEl.createDiv({ cls: 'claudian-mcp-status' });
-    statusEl.addClass(
-      server.enabled ? 'claudian-mcp-status-enabled' : 'claudian-mcp-status-disabled'
-    );
-
     const infoEl = itemEl.createDiv({ cls: 'claudian-mcp-info' });
-
     const nameRow = infoEl.createDiv({ cls: 'claudian-mcp-name-row' });
-
     const nameEl = nameRow.createSpan({ cls: 'claudian-mcp-name' });
     nameEl.setText(server.name);
 
@@ -120,18 +168,8 @@ export class McpSettingsManager {
     const typeEl = nameRow.createSpan({ cls: 'claudian-mcp-type-badge' });
     typeEl.setText(serverType);
 
-    if (server.contextSaving) {
-      const csEl = nameRow.createSpan({ cls: 'claudian-mcp-context-saving-badge' });
-      csEl.setText('@');
-      csEl.setAttribute('title', 'Context-saving: mention with @' + server.name + ' to enable');
-    }
-
     const previewEl = infoEl.createDiv({ cls: 'claudian-mcp-preview' });
-    if (server.description) {
-      previewEl.setText(server.description);
-    } else {
-      previewEl.setText(this.getServerPreview(server, serverType));
-    }
+    previewEl.setText(this.getServerPreview(server, serverType));
 
     const actionsEl = itemEl.createDiv({ cls: 'claudian-mcp-actions' });
 
@@ -142,17 +180,6 @@ export class McpSettingsManager {
     setIcon(testBtn, 'zap');
     testBtn.addEventListener('click', () => {
       void this.testServer(server);
-    });
-
-    const toggleBtn = actionsEl.createEl('button', {
-      cls: 'claudian-mcp-action-btn',
-      attr: { 'aria-label': server.enabled ? 'Disable' : 'Enable' },
-    });
-    setIcon(toggleBtn, server.enabled ? 'toggle-right' : 'toggle-left');
-    toggleBtn.addEventListener('click', () => {
-      void this.toggleServer(server).catch((error: unknown) => {
-        this.showMutationError(error, 'Failed to update MCP server');
-      });
     });
 
     const editBtn = actionsEl.createEl('button', {
@@ -178,130 +205,81 @@ export class McpSettingsManager {
     const modal = new McpTestModal(
       this.app,
       server.name,
-      server.disabledTools,
-      async (toolName, enabled) => {
-        await this.updateDisabledTool(server, toolName, enabled);
-      },
-      async (disabledTools) => {
-        await this.updateAllDisabledTools(server, disabledTools);
-      }
+      undefined,
+      undefined,
+      undefined,
+      { readOnly: this.portable },
     );
     modal.open();
-
     try {
-      const { testMcpServer } = await import('../../core/mcp/McpTester');
       const result = await testMcpServer(server);
-      modal.setResult(result);
+      if (!this.disposed) modal.setResult(result);
     } catch (error) {
-      modal.setError(error instanceof Error ? error.message : 'Verification failed');
+      if (!this.disposed) {
+        modal.setError(error instanceof Error ? error.message : 'Verification failed');
+      }
     }
-  }
-
-  /** Rolls back on save failure; warns on reload failure (since save succeeded). */
-  private async updateServerDisabledTools(
-    server: ManagedMcpServer,
-    newDisabledTools: string[] | undefined
-  ): Promise<void> {
-    const previous = server.disabledTools ? [...server.disabledTools] : undefined;
-    server.disabledTools = newDisabledTools;
-
-    try {
-      await this.mcpStorage.save(this.servers);
-    } catch (error) {
-      server.disabledTools = previous;
-      throw error;
-    }
-
-    try {
-      await this.broadcastMcpReload();
-    } catch {
-      // Save succeeded but reload failed - don't rollback since disk has correct state
-      new Notice('Setting saved but reload failed. Changes will apply on next session.');
-    }
-  }
-
-  private async updateDisabledTool(
-    server: ManagedMcpServer,
-    toolName: string,
-    enabled: boolean
-  ) {
-    const disabledTools = new Set(server.disabledTools ?? []);
-    if (enabled) {
-      disabledTools.delete(toolName);
-    } else {
-      disabledTools.add(toolName);
-    }
-    await this.updateServerDisabledTools(
-      server,
-      disabledTools.size > 0 ? Array.from(disabledTools) : undefined
-    );
-  }
-
-  private async updateAllDisabledTools(server: ManagedMcpServer, disabledTools: string[]) {
-    await this.updateServerDisabledTools(
-      server,
-      disabledTools.length > 0 ? disabledTools : undefined
-    );
   }
 
   private getServerPreview(server: ManagedMcpServer, type: McpServerType): string {
     if (type === 'stdio') {
       const config = server.config as { command: string; args?: string[] };
       return formatCommand(config.command, config.args);
-    } else {
-      const config = server.config as { url: string };
-      return config.url;
     }
+    const config = server.config as { url: string };
+    return config.url;
   }
 
   private openModal(existing: ManagedMcpServer | null, initialType?: McpServerType) {
     const modal = new McpServerModal(
       this.app,
       existing,
-      (server) => {
-        void this.saveServer(server, existing).catch((error: unknown) => {
+      async (server) => {
+        try {
+          await this.saveServer(server, existing);
+        } catch (error) {
           this.showMutationError(error, 'Failed to save MCP server');
-        });
+          throw error;
+        }
       },
-      initialType
+      initialType,
+      undefined,
+      { portable: this.portable },
     );
     modal.open();
   }
 
   private openImportModal(): void {
-    const modal = new McpImportModal(
-      this.app,
-      (config) => this.importPastedConfig(config),
-    );
+    const modal = new McpImportModal(this.app, (config) => this.importPastedConfig(config));
     modal.open();
+  }
+
+  private parsePortableImport(text: string) {
+    return parseClipboardConfig(text.trim());
   }
 
   private async importPastedConfig(text: string): Promise<boolean> {
     try {
-      const parsed = tryParseClipboardConfig(text);
-      if (!parsed || parsed.servers.length === 0) {
-        new Notice('No valid mcp configuration found');
-        return false;
-      }
-
-      if (parsed.needsName || parsed.servers.length === 1) {
+      const parsed = this.parsePortableImport(text);
+      if (parsed.needsName) {
         const server = parsed.servers[0];
-        const type = getMcpServerType(server.config);
         const modal = new McpServerModal(
           this.app,
           null,
-          (savedServer) => {
-            void this.saveServer(savedServer, null).catch((error: unknown) => {
+          async (savedServer) => {
+            try {
+              await this.saveServer(savedServer, null);
+            } catch (error) {
               this.showMutationError(error, 'Failed to save MCP server');
-            });
+              throw error;
+            }
           },
-          type,
-          server  // Pre-fill with parsed config
+          getMcpServerType(server.config),
+          server,
+          { portable: this.portable },
         );
         modal.open();
-        if (parsed.needsName) {
-          new Notice('Enter a name for the server');
-        }
+        new Notice('Enter a name for the server');
         return true;
       }
 
@@ -313,129 +291,156 @@ export class McpSettingsManager {
     }
   }
 
-  private async saveServer(server: ManagedMcpServer, existing: ManagedMcpServer | null) {
-    const previousServers = [...this.servers];
-    if (existing) {
-      const index = this.servers.findIndex((s) => s.name === existing.name);
-      if (index !== -1) {
-        if (server.name !== existing.name) {
-          const conflict = this.servers.find((s) => s.name === server.name);
-          if (conflict) {
-            new Notice(`Server "${server.name}" already exists`);
-            return;
-          }
+  private assertMutable(): void {
+    if (this.disposed) throw new Error('MCP settings manager is disposed');
+    if (this.loadError) {
+      throw new Error('Cannot modify MCP servers while .mcp.json cannot be read');
+    }
+  }
+
+  private commitMutation(
+    mutation: McpConfigMutation,
+    getCommittedServers: () => ManagedMcpServer[],
+  ): Promise<void> {
+    const commit = this.mutationQueue.then(async () => {
+      this.assertMutable();
+      const committedServers = getCommittedServers();
+      await this.mcpStorage.mutate(mutation);
+      if (!this.disposed) {
+        this.loadError = null;
+        this.servers = committedServers;
+        this.render();
+      }
+      try {
+        await this.broadcastMcpReload();
+      } catch {
+        if (!this.disposed) {
+          new Notice('Setting saved but reload failed. Changes will apply on next session.');
         }
-        this.servers[index] = server;
       }
-    } else {
-      const conflict = this.servers.find((s) => s.name === server.name);
-      if (conflict) {
-        new Notice(`Server "${server.name}" already exists`);
-        return;
-      }
-      this.servers.push(server);
-    }
-
-    try {
-      await this.mcpStorage.save(this.servers);
-    } catch (error) {
-      this.servers = previousServers;
-      throw error;
-    }
-    await this.broadcastMcpReload();
-    this.render();
-    new Notice(existing ? `MCP server "${server.name}" updated` : `MCP server "${server.name}" added`);
+    });
+    this.mutationQueue = commit.catch(() => undefined);
+    return commit;
   }
 
-  private async importServers(servers: Array<{ name: string; config: McpServerConfig }>) {
-    const previousServers = [...this.servers];
-    const added: string[] = [];
-    const skipped: string[] = [];
+  private async saveServer(server: ManagedMcpServer, existing: ManagedMcpServer | null) {
+    this.assertMutable();
+    assertPortableMcpServerName(server.name);
+    if (!isPortableMcpServerConfig(server.config)) {
+      throw new Error('Invalid portable MCP server configuration');
+    }
+    const normalizedServer: ManagedMcpServer = {
+      name: server.name,
+      config: server.config,
+      ...PORTABLE_DEFAULTS,
+    };
 
-    for (const server of servers) {
-      const name = server.name.trim();
-      if (!name || !/^[a-zA-Z0-9._-]+$/.test(name)) {
-        skipped.push(server.name || '<unnamed>');
-        continue;
+    await this.commitMutation(
+      {
+        type: 'upsert',
+        server: normalizedServer,
+        ...(existing ? { previousName: existing.name } : {}),
+      },
+      () => {
+        const index = existing
+          ? this.servers.findIndex((item) => item.name === existing.name)
+          : -1;
+        if (existing && index === -1) {
+          throw new Error(`MCP server "${existing.name}" no longer exists`);
+        }
+        const conflict = this.servers.find(
+          (item) => item.name === normalizedServer.name && item.name !== existing?.name,
+        );
+        if (conflict) {
+          throw new Error(`Server "${normalizedServer.name}" already exists`);
+        }
+        const committedServers = [...this.servers];
+        if (index === -1) {
+          committedServers.push(normalizedServer);
+        } else {
+          committedServers[index] = normalizedServer;
+        }
+        return committedServers;
+      },
+    );
+    if (!this.disposed) {
+      new Notice(
+        existing
+          ? `MCP server "${normalizedServer.name}" updated`
+          : `MCP server "${normalizedServer.name}" added`,
+      );
+    }
+  }
+
+  private async importServers(
+    servers: Array<{ name: string; config: McpServerConfig }>,
+  ): Promise<void> {
+    this.assertMutable();
+    if (servers.length === 0) throw new Error('No MCP servers found');
+
+    const names = new Set<string>();
+    const imported = servers.map(({ name, config }) => {
+      assertPortableMcpServerName(name);
+      if (names.has(name)) throw new Error(`Server "${name}" appears more than once`);
+      names.add(name);
+      if (!isPortableMcpServerConfig(config)) {
+        throw new Error(`Invalid MCP server config for "${name}"`);
       }
-
-      const conflict = this.servers.find((s) => s.name === name);
-      if (conflict) {
-        skipped.push(name);
-        continue;
-      }
-
-      this.servers.push({
+      return {
         name,
-        config: server.config,
-        enabled: DEFAULT_MCP_SERVER.enabled,
-        contextSaving: DEFAULT_MCP_SERVER.contextSaving,
-      });
-      added.push(name);
-    }
+        config,
+        ...PORTABLE_DEFAULTS,
+      };
+    });
 
-    if (added.length === 0) {
-      new Notice('No new mcp servers imported');
-      return;
+    await this.commitMutation(
+      { type: 'import', servers: imported },
+      () => {
+        const conflict = imported.find((server) =>
+          this.servers.some((existing) => existing.name === server.name),
+        );
+        if (conflict) {
+          throw new Error(`Server "${conflict.name}" already exists`);
+        }
+        return [...this.servers, ...imported];
+      },
+    );
+    if (!this.disposed) {
+      new Notice(`Imported ${imported.length} MCP server${imported.length > 1 ? 's' : ''}`);
     }
-
-    try {
-      await this.mcpStorage.save(this.servers);
-    } catch (error) {
-      this.servers = previousServers;
-      throw error;
-    }
-    await this.broadcastMcpReload();
-    this.render();
-
-    let message = `Imported ${added.length} MCP server${added.length > 1 ? 's' : ''}`;
-    if (skipped.length > 0) {
-      message += ` (${skipped.length} skipped)`;
-    }
-    new Notice(message);
   }
-
-  private async toggleServer(server: ManagedMcpServer) {
-    const previousEnabled = server.enabled;
-    server.enabled = !server.enabled;
-    try {
-      await this.mcpStorage.save(this.servers);
-    } catch (error) {
-      server.enabled = previousEnabled;
-      throw error;
-    }
-    await this.broadcastMcpReload();
-    this.render();
-    new Notice(`MCP server "${server.name}" ${server.enabled ? 'enabled' : 'disabled'}`);
-  }
-
   private async deleteServer(server: ManagedMcpServer) {
-    if (!(await confirmDelete(this.app, `Delete MCP server "${server.name}"?`))) {
-      return;
-    }
+    this.assertMutable();
+    if (!(await confirmDelete(this.app, `Delete MCP server "${server.name}"?`))) return;
 
-    const previousServers = this.servers;
-    this.servers = this.servers.filter((s) => s.name !== server.name);
-    try {
-      await this.mcpStorage.save(this.servers);
-    } catch (error) {
-      this.servers = previousServers;
-      throw error;
+    await this.commitMutation(
+      { type: 'delete', name: server.name },
+      () => this.servers.filter((item) => item.name !== server.name),
+    );
+    if (!this.disposed) {
+      new Notice(`MCP server "${server.name}" deleted`);
     }
-    await this.broadcastMcpReload();
-    this.render();
-    new Notice(`MCP server "${server.name}" deleted`);
   }
+
 
   /** Refresh the server list (call after external changes). */
-  public refresh() {
-    void this.loadAndRender();
+  public refresh(): Promise<void> {
+    if (this.disposed) return Promise.resolve();
+    return this.loadAndRender();
+  }
+
+  /** Stop asynchronous reads and DOM callbacks from updating this editor. */
+  public dispose(): void {
+    this.disposed = true;
+    ++this.loadGeneration;
+    if (this.outsideClickHandler) {
+      this.containerEl.ownerDocument?.removeEventListener('click', this.outsideClickHandler);
+      this.outsideClickHandler = null;
+    }
   }
 
   private showMutationError(error: unknown, fallback: string): void {
-    if (isNotifiedMutationError(error)) {
-      return;
-    }
+    if (isNotifiedMutationError(error)) return;
     new Notice(error instanceof Error ? error.message : fallback);
   }
 }

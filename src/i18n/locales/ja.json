@@ -169,7 +169,7 @@
     },
     "mcpServers": {
       "name": "MCP サーバー",
-      "desc": ".claude/mcp.json に保存された Vault レベルの MCP サーバー設定を管理します。コンテキスト保存モードのサーバーは @mention でアクティブにする必要があります。"
+      "desc": "Vault ルートの .mcp.json に保存されたポータブルな MCP サーバー設定を管理します。Claude Code、Copilot CLI、Oh My Pi は、これらの共有サーバーをすべて検出できます。"
     },
     "plugins": {
       "name": "Claude Code プラグイン",

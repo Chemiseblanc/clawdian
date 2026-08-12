@@ -20,7 +20,6 @@ import {
   getMcpServerType,
   isValidMcpServerConfig,
 } from '@/core/types/mcp';
-import { MCP_CONFIG_PATH, McpStorage } from '@/providers/claude/storage/McpStorage';
 import {
   extractMcpMentions,
   parseCommand,
@@ -37,25 +36,6 @@ jest.mock('@modelcontextprotocol/client/stdio', () => ({
   StdioClientTransport: jest.fn(),
 }));
 
-function createMemoryStorage(initialFile?: Record<string, unknown>): {
-  storage: McpStorage;
-  files: Map<string, string>;
-} {
-  const files = new Map<string, string>();
-  if (initialFile) {
-    files.set(MCP_CONFIG_PATH, JSON.stringify(initialFile));
-  }
-
-  const adapter = {
-    exists: async (path: string) => files.has(path),
-    read: async (path: string) => files.get(path) ?? '',
-    write: async (path: string, content: string) => {
-      files.set(path, content);
-    },
-  };
-
-  return { storage: new McpStorage(adapter as any), files };
-}
 
 // ============================================================================
 // MCP Type Tests
@@ -124,15 +104,15 @@ describe('MCP Types', () => {
 });
 
 // ============================================================================
-// McpStorage Clipboard Parsing Tests
+// MCP Clipboard Parsing Tests
 // ============================================================================
 
-describe('McpStorage', () => {
+describe('MCP Clipboard Parsing', () => {
   describe('parseClipboardConfig', () => {
-    it('should parse full Claude Code format', () => {
+    it('parses a full portable mcpServers wrapper', () => {
       const json = JSON.stringify({
         mcpServers: {
-          'my-server': { command: 'npx', args: ['server'] },
+          'my-server': { type: 'stdio', command: 'npx', args: ['server'] },
           'other-server': { type: 'sse', url: 'http://localhost:3000' },
         },
       });
@@ -141,105 +121,81 @@ describe('McpStorage', () => {
 
       expect(result.needsName).toBe(false);
       expect(result.servers).toHaveLength(2);
-      expect(result.servers[0].name).toBe('my-server');
-      expect(result.servers[0].config).toEqual({ command: 'npx', args: ['server'] });
+      expect(result.servers[0]).toEqual({
+        name: 'my-server',
+        config: { type: 'stdio', command: 'npx', args: ['server'] },
+      });
       expect(result.servers[1].name).toBe('other-server');
     });
 
-    it('should parse single server with name', () => {
-      const json = JSON.stringify({
-        'my-server': { command: 'docker', args: ['exec', '-i', 'container'] },
-      });
+    it('parses a single named server and a named server map', () => {
+      const named = parseClipboardConfig(
+        JSON.stringify({
+          'my-server': { type: 'stdio', command: 'docker', args: ['exec', '-i', 'container'] },
+        })
+      );
+      expect(named.needsName).toBe(false);
+      expect(named.servers[0].name).toBe('my-server');
 
-      const result = parseClipboardConfig(json);
-
-      expect(result.needsName).toBe(false);
-      expect(result.servers).toHaveLength(1);
-      expect(result.servers[0].name).toBe('my-server');
+      const multiple = parseClipboardConfig(
+        JSON.stringify({
+          server1: { type: 'stdio', command: 'npx' },
+          server2: { type: 'http', url: 'http://localhost:3000' },
+        })
+      );
+      expect(multiple.servers).toHaveLength(2);
     });
 
-    it('should parse single config without name', () => {
-      const json = JSON.stringify({
+    it('parses an unnamed config without inferring its transport', () => {
+      const result = parseClipboardConfig(
+        JSON.stringify({ type: 'stdio', command: 'python', args: ['-m', 'server'] })
+      );
+
+      expect(result.needsName).toBe(true);
+      expect(result.servers[0].name).toBe('');
+      expect(result.servers[0].config).toEqual({
+        type: 'stdio',
         command: 'python',
         args: ['-m', 'server'],
       });
-
-      const result = parseClipboardConfig(json);
-
-      expect(result.needsName).toBe(true);
-      expect(result.servers).toHaveLength(1);
-      expect(result.servers[0].name).toBe('');
-      expect(result.servers[0].config).toEqual({ command: 'python', args: ['-m', 'server'] });
     });
 
-    it('should parse URL config without name', () => {
-      const json = JSON.stringify({
-        type: 'sse',
-        url: 'http://localhost:3000/sse',
-        headers: { Authorization: 'Bearer token' },
-      });
-
-      const result = parseClipboardConfig(json);
-
-      expect(result.needsName).toBe(true);
-      expect(result.servers).toHaveLength(1);
-      expect(result.servers[0].config).toEqual({
-        type: 'sse',
-        url: 'http://localhost:3000/sse',
-        headers: { Authorization: 'Bearer token' },
-      });
-    });
-
-    it('should parse multiple named servers without mcpServers wrapper', () => {
-      const json = JSON.stringify({
-        server1: { command: 'npx' },
-        server2: { url: 'http://localhost:3000' },
-      });
-
-      const result = parseClipboardConfig(json);
-
-      expect(result.needsName).toBe(false);
-      expect(result.servers).toHaveLength(2);
-    });
-
-    it('should throw for invalid JSON', () => {
+    it('rejects invalid JSON, malformed maps, and implicit transport types', () => {
       expect(() => parseClipboardConfig('not json')).toThrow('Invalid JSON');
+      expect(() => parseClipboardConfig('{"invalidKey":"invalidValue"}')).toThrow(
+        'Invalid MCP server config'
+      );
+      expect(() => parseClipboardConfig(JSON.stringify({ command: 'npx' }))).toThrow(
+        'Invalid MCP configuration format'
+      );
     });
 
-    it('should throw for non-object JSON', () => {
-      expect(() => parseClipboardConfig('"string"')).toThrow('Invalid JSON object');
-      expect(() => parseClipboardConfig('123')).toThrow('Invalid JSON object');
-      expect(() => parseClipboardConfig('null')).toThrow('Invalid JSON object');
-    });
-
-    it('should throw for empty mcpServers', () => {
-      const json = JSON.stringify({ mcpServers: {} });
-      expect(() => parseClipboardConfig(json)).toThrow('No valid server configs');
-    });
-
-    it('should throw for invalid config format', () => {
-      const json = JSON.stringify({ invalidKey: 'invalidValue' });
-      expect(() => parseClipboardConfig(json)).toThrow('Invalid MCP configuration');
-    });
-
-    it('should skip invalid configs in mcpServers', () => {
+    it('rejects a mixed-validity mcpServers import atomically', () => {
       const json = JSON.stringify({
         mcpServers: {
-          valid: { command: 'npx' },
-          invalid: { notACommand: 'foo' },
+          valid: { type: 'stdio', command: 'npx' },
+          invalid: { type: 'stdio', command: 'npx', args: ['ok', 42] },
         },
       });
 
-      const result = parseClipboardConfig(json);
+      expect(() => parseClipboardConfig(json)).toThrow('invalid');
+    });
 
-      expect(result.servers).toHaveLength(1);
-      expect(result.servers[0].name).toBe('valid');
+    it('rejects unsafe names and malformed transport fields', () => {
+      expect(() =>
+        parseClipboardConfig(
+          JSON.stringify({ mcpServers: { workspace: { type: 'stdio', command: 'npx' } } })
+        )
+      ).toThrow('Invalid MCP server name');
+      expect(() =>
+        parseClipboardConfig(JSON.stringify({ type: 'http', url: 'ftp://example.com' }))
+      ).toThrow('Invalid MCP configuration format');
     });
   });
 
   describe('tryParseClipboardConfig', () => {
-    it('should return parsed config for valid JSON', () => {
-      const json = JSON.stringify({ command: 'npx' });
+    it('returns parsed config for valid JSON', () => {
+      const json = JSON.stringify({ type: 'stdio', command: 'npx' });
       const result = tryParseClipboardConfig(json);
 
       expect(result).not.toBeNull();
@@ -257,7 +213,7 @@ describe('McpStorage', () => {
     });
 
     it('should handle whitespace before JSON', () => {
-      const json = '  { "command": "npx" }';
+      const json = '  { "type": "stdio", "command": "npx" }';
       const result = tryParseClipboardConfig(json);
 
       expect(result).not.toBeNull();
@@ -269,164 +225,6 @@ describe('McpStorage', () => {
     });
   });
 
-  describe('load/save', () => {
-    it('should preserve unknown top-level keys and merge _claudian', async () => {
-      const initial = {
-        mcpServers: {
-          legacy: { command: 'node' },
-        },
-        _claudian: {
-          servers: {
-            legacy: { enabled: false },
-          },
-          extra: { keep: true },
-        },
-        other: { keep: true },
-      };
-      const { storage, files } = createMemoryStorage(initial);
-
-      const servers: ManagedMcpServer[] = [
-        {
-          name: 'new-server',
-          config: {
-            type: 'http',
-            url: 'http://localhost:3000/mcp',
-            headers: { Authorization: 'Bearer token' },
-          },
-          enabled: false,
-          contextSaving: false,
-          description: 'New server',
-        },
-      ];
-
-      await storage.save(servers);
-
-      const saved = JSON.parse(files.get(MCP_CONFIG_PATH) || '{}') as Record<string, unknown>;
-      expect(saved.other).toEqual({ keep: true });
-      expect(saved.mcpServers).toEqual({
-        'new-server': {
-          type: 'http',
-          url: 'http://localhost:3000/mcp',
-          headers: { Authorization: 'Bearer token' },
-        },
-      });
-      expect(saved._claudian).toEqual({
-        extra: { keep: true },
-        servers: {
-          'new-server': {
-            enabled: false,
-            contextSaving: false,
-            description: 'New server',
-          },
-        },
-      });
-    });
-
-    it('should keep existing _claudian fields when metadata is defaulted', async () => {
-      const initial = {
-        mcpServers: {
-          legacy: { command: 'node' },
-        },
-        _claudian: {
-          extra: { keep: true },
-        },
-      };
-      const { storage, files } = createMemoryStorage(initial);
-
-      const servers: ManagedMcpServer[] = [
-        {
-          name: 'default-meta',
-          config: { command: 'npx' },
-          enabled: DEFAULT_MCP_SERVER.enabled,
-          contextSaving: DEFAULT_MCP_SERVER.contextSaving,
-        },
-      ];
-
-      await storage.save(servers);
-
-      const saved = JSON.parse(files.get(MCP_CONFIG_PATH) || '{}') as Record<string, unknown>;
-      expect(saved._claudian).toEqual({ extra: { keep: true } });
-      expect(saved.mcpServers).toEqual({ 'default-meta': { command: 'npx' } });
-    });
-
-    it('should load servers with metadata and defaults', async () => {
-      const initial = {
-        mcpServers: {
-          stdio: { command: 'npx' },
-          remote: { type: 'sse', url: 'http://localhost:3000/sse' },
-        },
-        _claudian: {
-          servers: {
-            stdio: { enabled: false, contextSaving: false, description: 'Local tools' },
-          },
-        },
-      };
-      const { storage } = createMemoryStorage(initial);
-
-      const servers = await storage.load();
-
-      expect(servers).toHaveLength(2);
-      const stdio = servers.find((server) => server.name === 'stdio')!;
-      const remote = servers.find((server) => server.name === 'remote')!;
-
-      expect(stdio.enabled).toBe(false);
-      expect(stdio.contextSaving).toBe(false);
-      expect(stdio.description).toBe('Local tools');
-
-      expect(remote.enabled).toBe(true);
-      expect(remote.contextSaving).toBe(true);
-    });
-
-    it('should skip invalid server configs on load', async () => {
-      const initial = {
-        mcpServers: {
-          valid: { command: 'npx' },
-          invalid: { foo: 'bar' },
-        },
-        _claudian: {
-          servers: {
-            invalid: { enabled: false },
-          },
-        },
-      };
-      const { storage } = createMemoryStorage(initial);
-
-      const servers = await storage.load();
-
-      expect(servers).toHaveLength(1);
-      expect(servers[0].name).toBe('valid');
-      expect(servers[0].enabled).toBe(true);
-      expect(servers[0].contextSaving).toBe(true);
-    });
-
-    it('should remove _claudian when only servers metadata exists', async () => {
-      const initial = {
-        mcpServers: {
-          legacy: { command: 'node' },
-        },
-        _claudian: {
-          servers: {
-            legacy: { enabled: false },
-          },
-        },
-      };
-      const { storage, files } = createMemoryStorage(initial);
-
-      const servers: ManagedMcpServer[] = [
-        {
-          name: 'legacy',
-          config: { command: 'node' },
-          enabled: DEFAULT_MCP_SERVER.enabled,
-          contextSaving: DEFAULT_MCP_SERVER.contextSaving,
-        },
-      ];
-
-      await storage.save(servers);
-
-      const saved = JSON.parse(files.get(MCP_CONFIG_PATH) || '{}') as Record<string, unknown>;
-      expect(saved._claudian).toBeUndefined();
-    });
-  });
 });
 
 // ============================================================================

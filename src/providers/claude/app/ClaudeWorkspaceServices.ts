@@ -6,7 +6,6 @@ import { ProviderWorkspaceRegistry } from '../../../core/providers/ProviderWorks
 import type {
   AppAgentManager,
   AppAgentStorage,
-  AppMcpStorage,
   AppPluginManager,
   ProviderCliResolver,
   ProviderWorkspaceRegistration,
@@ -30,7 +29,7 @@ import { claudeSettingsTabRenderer } from '../ui/ClaudeSettingsTab';
 export interface ClaudeWorkspaceServices extends ProviderWorkspaceServices {
   claudeStorage: StorageService;
   cliResolver: ProviderCliResolver;
-  mcpStorage: AppMcpStorage;
+  sharedMcpServerManager: McpServerManager;
   mcpManager: McpServerManager;
   pluginManager: AppPluginManager;
   agentStorage: AppAgentStorage;
@@ -53,8 +52,7 @@ export async function createClaudeWorkspaceServices(
   const claudeStorage = new StorageService(plugin, adapter);
 
   const cliResolver = new ClaudeCliResolver();
-  const mcpStorage = claudeStorage.mcp;
-  const mcpManager = new McpServerManager(mcpStorage);
+  const mcpManager = new McpServerManager(plugin.storage.mcp);
 
   const vaultPath = getVaultPath(plugin.app) ?? '';
   const getClaudeConfigDir = () => resolveClaudeConfigDir({
@@ -89,7 +87,7 @@ export async function createClaudeWorkspaceServices(
   return {
     claudeStorage,
     cliResolver,
-    mcpStorage,
+    sharedMcpServerManager: mcpManager,
     mcpServerManager: mcpManager,
     mcpManager,
     pluginManager,

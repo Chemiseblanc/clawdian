@@ -77,6 +77,8 @@ export interface FeatureHost {
   readonly storage: SharedAppStorage;
   readonly warmExecutionPool: WarmExecutionPool;
 
+  reloadMcpServers(): Promise<void>;
+
   mutateSettings(
     mutation: (settings: ClaudianSettings) => void | Promise<void>,
   ): Promise<void>;

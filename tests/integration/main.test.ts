@@ -4,10 +4,12 @@ import { TFile, TFolder } from 'obsidian';
 import { OneOffJobsService } from '@/app/jobs/OneOffJobsService';
 import { PeriodicJobsService } from '@/app/jobs/PeriodicJobsService';
 import { ConversationPersistenceStore } from '@/core/bootstrap/ConversationPersistenceStore';
+import { McpServerManager } from '@/core/mcp/McpServerManager';
 import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
 import { ProviderSettingsCoordinator } from '@/core/providers/ProviderSettingsCoordinator';
 import { ProviderWorkspaceRegistry } from '@/core/providers/ProviderWorkspaceRegistry';
 import { isVersionedRuntimeInputFingerprint } from '@/core/providers/settings/RuntimeInputFingerprint';
+import type { ProviderWorkspaceServices } from '@/core/providers/types';
 import { TOOL_SUBAGENT } from '@/core/tools/toolNames';
 import { type Conversation, VIEW_TYPE_CLAUDIAN } from '@/core/types';
 import * as sdkSession from '@/providers/claude/history/ClaudeHistoryStore';
@@ -1476,6 +1478,75 @@ describe('ClaudianPlugin', () => {
       expect(content).not.toHaveProperty('blockedCommands');
       // Permissions are now in .claude/settings.json (CC format), not claudian-settings.json
       expect(content).not.toHaveProperty('permissions');
+    });
+  });
+
+  describe('reloadMcpServers', () => {
+    it('reloads only initialized providers with shared MCP managers', async () => {
+      const registeredProviderIds = ['claude', 'codex', 'grok'] as const;
+      const sharedManager = new McpServerManager({
+        load: jest.fn().mockResolvedValue([]),
+      });
+      const sharedReload = jest.spyOn(sharedManager, 'reloadServers')
+        .mockResolvedValue(undefined);
+      const unsupportedManager = new McpServerManager({
+        load: jest.fn().mockResolvedValue([]),
+      });
+      const unsupportedReload = jest.spyOn(unsupportedManager, 'reloadServers')
+        .mockResolvedValue(undefined);
+      const initializedServices: Record<string, ProviderWorkspaceServices> = {
+        claude: { sharedMcpServerManager: sharedManager },
+        codex: { mcpServerManager: unsupportedManager },
+      };
+      const getRegisteredProviderIds = jest.spyOn(
+        ProviderRegistry,
+        'getRegisteredProviderIds',
+      ).mockReturnValue([...registeredProviderIds]);
+      const getIfInitialized = jest.spyOn(ProviderWorkspaceRegistry, 'getIfInitialized')
+        .mockImplementation(providerId => initializedServices[providerId] ?? null);
+      const ensureInitialized = jest.spyOn(ProviderWorkspaceRegistry, 'ensureInitialized');
+      const codexBeforeTransition = jest.fn();
+      const unregisterCodexHook = plugin.executionLifecycleRegistry.registerTransitionHook(
+        'codex',
+        { beforeTransition: codexBeforeTransition },
+      );
+
+      try {
+        await plugin.reloadMcpServers();
+
+        expect(sharedReload).toHaveBeenCalledTimes(1);
+        expect(unsupportedReload).not.toHaveBeenCalled();
+        expect(ensureInitialized).not.toHaveBeenCalled();
+        expect(plugin.executionLifecycleRegistry.getProviderGeneration('claude')).toBe(1);
+        expect(plugin.executionLifecycleRegistry.getProviderGeneration('codex')).toBe(0);
+        expect(plugin.executionLifecycleRegistry.getProviderGeneration('grok')).toBe(0);
+        expect(codexBeforeTransition).not.toHaveBeenCalled();
+      } finally {
+        unregisterCodexHook();
+        ensureInitialized.mockRestore();
+        getIfInitialized.mockRestore();
+        getRegisteredProviderIds.mockRestore();
+      }
+    });
+
+    it('does not transition when no initialized provider exposes shared MCP', async () => {
+      const getRegisteredProviderIds = jest.spyOn(
+        ProviderRegistry,
+        'getRegisteredProviderIds',
+      ).mockReturnValue(['codex', 'grok']);
+      const getIfInitialized = jest.spyOn(ProviderWorkspaceRegistry, 'getIfInitialized')
+        .mockReturnValue(null);
+      const transition = jest.spyOn(plugin, 'runProviderExecutionTransition');
+
+      try {
+        await plugin.reloadMcpServers();
+
+        expect(transition).not.toHaveBeenCalled();
+      } finally {
+        transition.mockRestore();
+        getIfInitialized.mockRestore();
+        getRegisteredProviderIds.mockRestore();
+      }
     });
   });
 

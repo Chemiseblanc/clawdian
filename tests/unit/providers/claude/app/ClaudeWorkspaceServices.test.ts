@@ -1,3 +1,4 @@
+import type { AppMcpStorage } from '@/core/bootstrap/storage';
 import { ProviderExecutionLifecycleRegistry } from '@/core/execution';
 import type { ProviderHost } from '@/core/providers/ProviderHost';
 import type { VaultFileAdapter } from '@/core/storage/VaultFileAdapter';
@@ -23,6 +24,13 @@ function createAdapter(): VaultFileAdapter {
   } as unknown as VaultFileAdapter;
 }
 
+function createMcpStorage(): AppMcpStorage {
+  return {
+    load: jest.fn().mockResolvedValue([]),
+    mutate: jest.fn().mockResolvedValue(undefined),
+  };
+}
+
 function createPlugin(
   executionLifecycleRegistry: ProviderExecutionLifecycleRegistry,
 ): ProviderHost {
@@ -32,6 +40,7 @@ function createPlugin(
         adapter: { basePath: '/tmp/claude-workspace' },
       },
     },
+    storage: { mcp: createMcpStorage() },
     executionLifecycleRegistry,
     getActiveEnvironmentVariables: jest.fn(() => ''),
     loadData: jest.fn().mockResolvedValue({}),

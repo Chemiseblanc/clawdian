@@ -15,6 +15,7 @@ import { getAvailableLocales, getLocaleDisplayName, setLocale, t } from '../../i
 import type { Locale, TranslationKey } from '../../i18n/types';
 import { AgentSkillSettings } from '../../shared/settings/AgentSkillSettings';
 import { renderEnvironmentSettingsSection } from '../../shared/settings/EnvironmentSettingsSection';
+import { McpSettingsManager } from '../../shared/settings/McpSettingsManager';
 import { formatContextLimit, parseContextLimit, parseEnvironmentVariables } from '../../utils/env';
 import {
   MAX_WARM_AGENT_PROCESSES,
@@ -123,6 +124,7 @@ export class ClaudianSettingTab extends PluginSettingTab {
   private readonly agentSkillCoordinator: AgentSkillManagementCoordinator;
   private periodicJobSettings: PeriodicJobSettings | null = null;
   private oneOffJobSettings: OneOffJobSettings | null = null;
+  private mcpSettingsManager: McpSettingsManager | null = null;
 
   constructor(app: App, plugin: FeatureHost & Plugin) {
     super(app, plugin);
@@ -149,6 +151,8 @@ export class ClaudianSettingTab extends PluginSettingTab {
     this.periodicJobSettings = null;
     this.oneOffJobSettings?.dispose();
     this.oneOffJobSettings = null;
+    this.mcpSettingsManager?.dispose();
+    this.mcpSettingsManager = null;
     const { containerEl } = this;
     containerEl.empty();
     containerEl.addClass('claudian-settings');
@@ -692,6 +696,23 @@ export class ClaudianSettingTab extends PluginSettingTab {
       desc: 'Provider-neutral runtime variables shared across all providers. Use this for PATH, proxy, cert, and temp variables.',
       placeholder: 'PATH=/opt/homebrew/bin:/usr/local/bin\nHTTPS_PROXY=http://proxy.example.com:8080\nSSL_CERT_FILE=/path/to/cert.pem',
     });
+
+    // --- MCP Servers ---
+
+    new Setting(container).setName(t('settings.mcpServers.name')).setHeading();
+
+    const mcpDesc = container.createDiv({ cls: 'claudian-mcp-settings-desc' });
+    mcpDesc.createEl('p', {
+      text: t('settings.mcpServers.desc'),
+      cls: 'setting-item-description',
+    });
+
+    const mcpContainer = container.createDiv({ cls: 'claudian-mcp-container' });
+    this.mcpSettingsManager = new McpSettingsManager(mcpContainer, {
+      app: this.plugin.app,
+      mcpStorage: this.plugin.storage.mcp,
+      broadcastMcpReload: () => this.plugin.reloadMcpServers(),
+    }, { portable: true });
 
     // --- Advanced ---
 

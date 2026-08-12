@@ -169,7 +169,7 @@
     },
     "mcpServers": {
       "name": "MCP-Server",
-      "desc": "Verwalte Vault-MCP-Serverkonfigurationen in .claude/mcp.json. Server mit Kontext-Speichermodus benötigen @mention zur Aktivierung."
+      "desc": "Verwalte portable MCP-Serverkonfigurationen in der Datei .mcp.json im Vault-Stammverzeichnis. Claude Code, Copilot CLI und Oh My Pi können diese gemeinsamen Server erkennen."
     },
     "plugins": {
       "name": "Claude Code-Plugins",

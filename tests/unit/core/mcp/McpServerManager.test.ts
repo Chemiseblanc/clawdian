@@ -1,6 +1,17 @@
 import { McpServerManager } from '@/core/mcp/McpServerManager';
 import type { ManagedMcpServer } from '@/core/types';
 
+function deferred<T>(): {
+  promise: Promise<T>;
+  resolve(value: T): void;
+} {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((finish) => {
+    resolve = finish;
+  });
+  return { promise, resolve };
+}
+
 const createManager = async (servers: ManagedMcpServer[]) => {
   const manager = new McpServerManager({
     load: async () => servers,
@@ -425,5 +436,59 @@ describe('McpServerManager', () => {
 
       expect(load).toHaveBeenCalledTimes(1);
     });
+    it('waits for an active load before issuing a fresh read', async () => {
+      const active = deferred<ManagedMcpServer[]>();
+      const fresh = deferred<ManagedMcpServer[]>();
+      const load = jest.fn()
+        .mockReturnValueOnce(active.promise)
+        .mockReturnValueOnce(fresh.promise);
+      const manager = new McpServerManager({ load });
+
+      const initialLoad = manager.loadServers();
+      const reload = manager.reloadServers();
+
+      expect(load).toHaveBeenCalledTimes(1);
+      active.resolve([
+        { name: 'stale', config: { command: 'stale' }, enabled: true, contextSaving: false },
+      ]);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+
+      expect(load).toHaveBeenCalledTimes(2);
+      fresh.resolve([
+        { name: 'fresh', config: { command: 'fresh' }, enabled: true, contextSaving: false },
+      ]);
+      await expect(Promise.all([initialLoad, reload])).resolves.toEqual([undefined, undefined]);
+      expect(manager.getServers()).toEqual([
+        { name: 'fresh', config: { command: 'fresh' }, enabled: true, contextSaving: false },
+      ]);
+    });
+
+    it('serializes concurrent reloads so an older completion cannot win', async () => {
+      const first = deferred<ManagedMcpServer[]>();
+      const second = deferred<ManagedMcpServer[]>();
+      const load = jest.fn()
+        .mockReturnValueOnce(first.promise)
+        .mockReturnValueOnce(second.promise);
+      const manager = new McpServerManager({ load });
+
+      const firstReload = manager.reloadServers();
+      const secondReload = manager.reloadServers();
+
+      expect(load).toHaveBeenCalledTimes(1);
+      first.resolve([
+        { name: 'older', config: { command: 'older' }, enabled: true, contextSaving: false },
+      ]);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+
+      expect(load).toHaveBeenCalledTimes(2);
+      second.resolve([
+        { name: 'newer', config: { command: 'newer' }, enabled: true, contextSaving: false },
+      ]);
+      await expect(Promise.all([firstReload, secondReload])).resolves.toEqual([undefined, undefined]);
+      expect(manager.getServers()).toEqual([
+        { name: 'newer', config: { command: 'newer' }, enabled: true, contextSaving: false },
+      ]);
+    });
+
   });
 });

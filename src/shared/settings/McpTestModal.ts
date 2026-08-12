@@ -9,15 +9,16 @@ function formatToggleError(error: unknown): string {
 
   const msg = error.message.toLowerCase();
   if (msg.includes('permission') || msg.includes('eacces')) {
-    return 'Permission denied. Check .claude/ folder permissions.';
-  }
-  if (msg.includes('enospc') || msg.includes('disk full') || msg.includes('no space')) {
-    return 'Disk full. Free up space and try again.';
+    return 'Permission denied. Check vault permissions.';
   }
   if (msg.includes('json') || msg.includes('syntax')) {
-    return 'Config file corrupted. Check .claude/mcp.json';
+    return 'Config file corrupted. Check vault-root .mcp.json';
   }
   return error.message || 'Failed to update tool setting';
+}
+
+export interface McpTestModalOptions {
+  readOnly?: boolean;
 }
 
 function appendSpinnerSvg(container: HTMLElement): void {
@@ -47,13 +48,15 @@ export class McpTestModal extends Modal {
   private toolElements: Map<string, HTMLElement> = new Map();
   private toggleAllBtn: HTMLButtonElement | null = null;
   private pendingToggle = false;
+  private readOnly: boolean;
 
   constructor(
     app: App,
     serverName: string,
     initialDisabledTools?: string[],
     onToolToggle?: (toolName: string, enabled: boolean) => Promise<void>,
-    onBulkToggle?: (disabledTools: string[]) => Promise<void>
+    onBulkToggle?: (disabledTools: string[]) => Promise<void>,
+    options?: McpTestModalOptions
   ) {
     super(app);
     this.serverName = serverName;
@@ -64,6 +67,7 @@ export class McpTestModal extends Modal {
     );
     this.onToolToggle = onToolToggle;
     this.onBulkToggle = onBulkToggle;
+    this.readOnly = options?.readOnly ?? (!onToolToggle && !onBulkToggle);
   }
 
   onOpen() {
@@ -138,6 +142,7 @@ export class McpTestModal extends Modal {
 
     this.toolToggles.clear();
     this.toolElements.clear();
+    this.toggleAllBtn = null;
 
     if (this.result.tools.length > 0) {
       const toolsSection = this.contentEl_.createDiv({ cls: 'claudian-mcp-test-tools' });
@@ -157,7 +162,7 @@ export class McpTestModal extends Modal {
 
     const buttonContainer = this.contentEl_.createDiv({ cls: 'claudian-mcp-test-buttons' });
 
-    if (this.result.tools.length > 0 && this.onToolToggle) {
+    if (!this.readOnly && this.result.tools.length > 0 && this.onToolToggle) {
       this.toggleAllBtn = buttonContainer.createEl('button', {
         cls: 'claudian-mcp-toggle-all-btn',
       });
@@ -185,32 +190,34 @@ export class McpTestModal extends Modal {
     const nameEl = headerEl.createSpan({ cls: 'claudian-mcp-test-tool-name' });
     nameEl.setText(tool.name);
 
-    const toggleEl = headerEl.createDiv({ cls: 'claudian-mcp-test-tool-toggle' });
-    const toggleContainer = toggleEl.createDiv({ cls: 'checkbox-container' });
-    const checkbox = toggleContainer.createEl('input', {
-      type: 'checkbox',
-      attr: { tabindex: '0' },
-    });
-
-    const isEnabled = !this.disabledTools.has(tool.name);
-    checkbox.checked = isEnabled;
-    toggleContainer.toggleClass('is-enabled', isEnabled);
-    this.updateToolState(toolEl, isEnabled);
-
-    this.toolToggles.set(tool.name, { checkbox, container: toggleContainer });
-    this.toolElements.set(tool.name, toolEl);
-
-    if (!this.onToolToggle) {
-      checkbox.disabled = true;
-    } else {
-      // Click on container instead of checkbox change event for cross-browser reliability
-      toggleContainer.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        if (checkbox.disabled) return;
-        checkbox.checked = !checkbox.checked;
-        void this.handleToolToggle(tool.name, checkbox, toggleContainer);
+    if (!this.readOnly) {
+      const toggleEl = headerEl.createDiv({ cls: 'claudian-mcp-test-tool-toggle' });
+      const toggleContainer = toggleEl.createDiv({ cls: 'checkbox-container' });
+      const checkbox = toggleContainer.createEl('input', {
+        type: 'checkbox',
+        attr: { tabindex: '0' },
       });
+
+      const isEnabled = !this.disabledTools.has(tool.name);
+      checkbox.checked = isEnabled;
+      toggleContainer.toggleClass('is-enabled', isEnabled);
+      this.updateToolState(toolEl, isEnabled);
+
+      this.toolToggles.set(tool.name, { checkbox, container: toggleContainer });
+      this.toolElements.set(tool.name, toolEl);
+
+      if (!this.onToolToggle) {
+        checkbox.disabled = true;
+      } else {
+        // Click on container instead of checkbox change event for cross-browser reliability
+        toggleContainer.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          if (checkbox.disabled) return;
+          checkbox.checked = !checkbox.checked;
+          void this.handleToolToggle(tool.name, checkbox, toggleContainer);
+        });
+      }
     }
 
     if (tool.description) {

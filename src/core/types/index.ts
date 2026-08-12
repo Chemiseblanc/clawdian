@@ -91,7 +91,6 @@ export {
   DEFAULT_MCP_SERVER,
   getMcpServerType,
   isValidMcpServerConfig,
-  type ManagedMcpConfigFile,
   type ManagedMcpServer,
   type McpConfigFile,
   type McpHttpServerConfig,

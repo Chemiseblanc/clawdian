@@ -169,7 +169,7 @@
     },
     "mcpServers": {
       "name": "Serveurs MCP",
-      "desc": "Gérez les configurations de serveurs MCP au niveau du vault stockées dans .claude/mcp.json. Les serveurs avec mode de sauvegarde de contexte nécessitent une @mention pour s'activer."
+      "desc": "Gérez les configurations portables de serveurs MCP stockées dans le fichier .mcp.json à la racine du vault. Claude Code, Copilot CLI et Oh My Pi peuvent découvrir ces serveurs partagés."
     },
     "plugins": {
       "name": "Plugins Claude Code",

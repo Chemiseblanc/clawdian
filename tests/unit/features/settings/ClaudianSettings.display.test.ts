@@ -99,6 +99,19 @@ jest.mock('obsidian', () => {
   };
 });
 
+type McpSettingsManagerArgs = ConstructorParameters<typeof McpSettingsManager>;
+
+const mockMcpSettingsManager = jest.fn(
+  (..._args: McpSettingsManagerArgs) => ({
+    dispose: jest.fn(),
+  }),
+);
+jest.mock('@/shared/settings/McpSettingsManager', () => ({
+  McpSettingsManager: jest.fn(
+    (...args: McpSettingsManagerArgs) => mockMcpSettingsManager(...args),
+  ),
+}));
+
 import { DEFAULT_CLAUDIAN_SETTINGS } from '@/app/settings/defaultSettings';
 import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
 import { ProviderWorkspaceRegistry } from '@/core/providers/ProviderWorkspaceRegistry';
@@ -106,6 +119,7 @@ import { ClaudianSettingTab } from '@/features/settings/ClaudianSettings';
 import { OneOffJobSettings } from '@/features/settings/ui/OneOffJobSettings';
 import { PeriodicJobSettings } from '@/features/settings/ui/PeriodicJobSettings';
 import { t } from '@/i18n/i18n';
+import type { McpSettingsManager } from '@/shared/settings/McpSettingsManager';
 
 function createTab(enableDualPane: boolean, enableFilePane = true): {
   tab: ClaudianSettingTab;
@@ -137,8 +151,13 @@ function createTab(enableDualPane: boolean, enableFilePane = true): {
     }),
     getAllViews: jest.fn(() => [{ refreshDualPaneLayout: jest.fn() }]),
     notifyAgentSkillsChanged: jest.fn(),
+    reloadMcpServers: jest.fn().mockResolvedValue(undefined),
     storage: {
       getAdapter: jest.fn(() => ({})),
+      mcp: {
+        load: jest.fn().mockResolvedValue([]),
+        mutate: jest.fn().mockResolvedValue(undefined),
+      },
     },
     warmExecutionPool: {
       reconcileLimit: jest.fn(),
@@ -201,6 +220,7 @@ describe('ClaudianSettingTab display settings', () => {
   beforeEach(() => {
     mockRenderedSettingNames.length = 0;
     mockToggleChanges.clear();
+    mockMcpSettingsManager.mockClear();
   });
 
   it('renders the dual-pane position only while dual-pane mode is enabled', () => {
@@ -218,6 +238,32 @@ describe('ClaudianSettingTab display settings', () => {
 
     expect(mockRenderedSettingNames).not.toContain(t('settings.dualPaneSide.name'));
     expect(mockRenderedSettingNames).not.toContain(t('settings.enableFilePane.name'));
+  });
+  it('renders the portable MCP editor in General settings', async () => {
+    const { tab, plugin } = createTab(true);
+    const renderGeneralTab = Reflect.get(tab, 'renderGeneralTab');
+    if (typeof renderGeneralTab !== 'function') {
+      throw new Error('Expected General settings renderer');
+    }
+    renderGeneralTab.call(tab, createContainer());
+
+    expect(mockMcpSettingsManager).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        app: plugin.app,
+        mcpStorage: plugin.storage.mcp,
+        broadcastMcpReload: expect.any(Function),
+      }),
+      { portable: true },
+    );
+    const call = mockMcpSettingsManager.mock.calls[0];
+    if (!call) {
+      throw new Error('Expected MCP settings manager dependencies');
+    }
+    const dependencies = call[1];
+    await dependencies.broadcastMcpReload();
+
+    expect(plugin.reloadMcpServers).toHaveBeenCalledTimes(1);
   });
 
   it('updates the file pane setting and refreshes open dual-pane views', async () => {

@@ -10,8 +10,13 @@ describe('ClaudianSettingTab model option updates', () => {
       getAllViews: jest.fn(() => [{ refreshModelSelector }]),
       notifyProviderChatOptionsChanged,
       notifyAgentSkillsChanged: jest.fn(),
+      reloadMcpServers: jest.fn().mockResolvedValue(undefined),
       storage: {
         getAdapter: jest.fn(() => ({})),
+        mcp: {
+          load: jest.fn().mockResolvedValue([]),
+          mutate: jest.fn().mockResolvedValue(undefined),
+        },
       },
     };
     const tab = new ClaudianSettingTab({} as any, plugin as any);
@@ -33,8 +38,13 @@ describe('ClaudianSettingTab model option updates', () => {
     const plugin = {
       providerHost: { runProviderExecutionTransition },
       settings: {},
+      reloadMcpServers: jest.fn().mockResolvedValue(undefined),
       storage: {
         getAdapter: jest.fn(() => ({})),
+        mcp: {
+          load: jest.fn().mockResolvedValue([]),
+          mutate: jest.fn().mockResolvedValue(undefined),
+        },
       },
     };
     const tab = new ClaudianSettingTab({} as any, plugin as any);

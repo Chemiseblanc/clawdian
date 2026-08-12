@@ -11,7 +11,6 @@ import type {
   AuxiliaryContinuityReset,
   Conversation,
   InstructionRefineResult,
-  ManagedMcpServer,
   PluginInfo,
   SessionMetadata,
   SlashCommand,
@@ -138,11 +137,6 @@ export interface SessionMetadataScanResult {
 // contract (`SharedAppStorage`).
 // ---------------------------------------------------------------------------
 
-export interface AppMcpStorage {
-  load(): Promise<ManagedMcpServer[]>;
-  save(servers: ManagedMcpServer[]): Promise<void>;
-  tryParseClipboardConfig?(text: string): unknown;
-}
 
 export interface AppCommandStorage {
   save(command: SlashCommand): Promise<void>;
@@ -427,6 +421,7 @@ export interface ProviderWorkspaceServices {
   commandLoader?: ProviderCommandLoader | null;
   tabWarmupPolicy?: ProviderTabWarmupPolicy | null;
   mcpServerManager?: McpServerManager | null;
+  sharedMcpServerManager?: McpServerManager | null;
   settingsTabRenderer?: ProviderSettingsTabRenderer | null;
   refreshAgentMentions?(context?: ProviderTransitionOwnerContext): Promise<void>;
   refreshModelCatalog?(

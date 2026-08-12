@@ -169,7 +169,7 @@
     },
     "mcpServers": {
       "name": "MCP 伺服器",
-      "desc": "管理儲存在 .claude/mcp.json 中的 Vault 級 MCP 伺服器配置。啟用上下文保存模式的伺服器需要 @ 提及才能啟用。"
+      "desc": "管理儲存在 Vault 根目錄 .mcp.json 中的可移植 MCP 伺服器配置。Claude Code、Copilot CLI 和 Oh My Pi 都可以發現這些共用伺服器。"
     },
     "plugins": {
       "name": "Claude Code 外掛程式",
