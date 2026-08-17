@@ -15,7 +15,7 @@ const baseSettings: OmpProviderSettings = {
 };
 
 describe('OmpLaunchSpec', () => {
-  it('builds main launch args with replacement system prompt and model flags', () => {
+  it('builds main launch args with appended system prompt and model flags', () => {
     expect(buildOmpLaunchSpec({
       command: '/bin/omp',
       cwd: '/vault',
@@ -27,7 +27,7 @@ describe('OmpLaunchSpec', () => {
     }).args).toEqual([
       '--mode',
       'rpc',
-      '--system-prompt',
+      '--append-system-prompt',
       'System prompt',
       '--resume',
       '/tmp/session.jsonl',
