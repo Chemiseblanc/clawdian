@@ -28,6 +28,7 @@ import type { OmpLaunchSpec } from '@/providers/omp/runtime/OmpLaunchSpec';
 
 class FakeKernel implements OmpExecutionKernel {
   readonly requests: Array<{ payload: Record<string, unknown>; type: string }> = [];
+  readonly requestTimeouts: Array<{ timeoutMs: number | undefined; type: string }> = [];
   readonly sent: Array<Record<string, unknown>> = [];
   readonly shutdown = jest.fn(async () => undefined);
   readonly start = jest.fn();
@@ -72,6 +73,7 @@ class FakeKernel implements OmpExecutionKernel {
     signal?: AbortSignal,
   ): Promise<T> {
     this.requests.push({ payload, type });
+    this.requestTimeouts.push({ timeoutMs, type });
     if (this.requestHandler) {
       return this.requestHandler<T>(type, payload, timeoutMs, signal);
     }
@@ -574,6 +576,22 @@ describe('OmpExecutionBackend', () => {
       expect.objectContaining({ id: 'omp:runtime:compact', name: 'compact' }),
     ]);
     expect(new Set(events.map(event => event.scope.sequence)).size).toBe(events.length);
+  });
+
+  it('disables the RPC deadline for long-running prompt turns', async () => {
+    const harness = createHarness();
+    const run = harness.session.execute(createRequest());
+    const eventsPromise = collect(run.events);
+    await waitFor(() => harness.kernels[0]?.requests.some(({ type }) => type === 'prompt'));
+
+    const kernel = harness.kernels[0];
+    expect(kernel.requestTimeouts.find(({ type }) => type === 'prompt')).toEqual({
+      timeoutMs: 0,
+      type: 'prompt',
+    });
+
+    completeTurn(kernel);
+    await eventsPromise;
   });
 
   it('launches resumed persistent sessions with their native session file', async () => {

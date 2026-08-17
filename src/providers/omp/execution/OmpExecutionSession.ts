@@ -91,6 +91,9 @@ import {
   type OmpExecutionKernelFactory,
 } from './OmpExecutionKernel';
 
+// OMP prompt requests remain open for the full turn while events stream progress.
+const OMP_PROMPT_TURN_TIMEOUT_MS = 0;
+
 interface OmpExecutionSessionOptions {
   readonly createForkSessionFile: typeof createOmpForkSessionFile;
   readonly createKernel: OmpExecutionKernelFactory;
@@ -416,7 +419,7 @@ implements ProviderExecutionSession, SteerableExecutionSession {
             ...(encoded.images.length > 0 ? { images: encoded.images } : {}),
             message: encoded.prompt,
           },
-          undefined,
+          OMP_PROMPT_TURN_TIMEOUT_MS,
           active.abortController.signal,
         );
         await promptRequest;
