@@ -31,7 +31,7 @@ export function buildOmpLaunchSpec(params: BuildOmpLaunchSpecParams): OmpLaunchS
   const args = ['--mode', 'rpc'];
   const systemPrompt = params.systemPrompt?.trim();
   if (systemPrompt) {
-    args.push('--system-prompt', systemPrompt);
+    args.push('--append-system-prompt', systemPrompt);
   }
 
   if (params.noSession) {
